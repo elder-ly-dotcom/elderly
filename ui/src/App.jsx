@@ -9,6 +9,7 @@ import LandingPage from "./pages/LandingPage";
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
 import ElderManagement from "./pages/customer/ElderManagement";
 import SubscriptionsPage from "./pages/customer/Subscriptions";
+import CelebrationsPage from "./pages/customer/Celebrations";
 import VisitBookings from "./pages/customer/VisitBookings";
 import WorkerDashboard from "./pages/worker/WorkerDashboard";
 import TaskReportingHub from "./pages/worker/TaskReportingHub";
@@ -84,6 +85,7 @@ export default function App() {
                   { to: "/customer/dashboard", label: "Dashboard" },
                   { to: "/customer/elders", label: "Profile" },
                   { to: "/customer/subscriptions", label: "Subscriptions" },
+                  { to: "/customer/celebrations", label: "Celebrations" },
                   { to: "/customer/visits", label: "Visits" },
                 ]}
               />
@@ -92,6 +94,7 @@ export default function App() {
             <Route path="dashboard" element={<CustomerDashboard />} />
             <Route path="elders" element={<ElderManagement />} />
             <Route path="subscriptions" element={<SubscriptionsPage />} />
+            <Route path="celebrations" element={<CelebrationsPage />} />
             <Route path="visits" element={<VisitBookings />} />
           </Route>
         </Route>

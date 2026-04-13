@@ -41,6 +41,7 @@ class Visit(Base):
     photo_start_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     photo_end_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     voice_note_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    voice_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
     distance_meters: Mapped[float | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, time
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +29,7 @@ class VisitCheckOutRequest(BaseModel):
     notes: str | None = None
     mood_photo_url: str | None = Field(default=None, max_length=500)
     voice_note_url: str | None = Field(default=None, max_length=500)
+    voice_transcript: str | None = None
     tasks: list[VisitTaskCreate] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
@@ -68,6 +69,21 @@ class WorkerDispatchStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class WorkerShiftDay(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    day_of_week: int = Field(ge=0, le=6)
+    is_active: bool = True
+    start_time: time
+    end_time: time
+
+
+class WorkerShiftUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shifts: list[WorkerShiftDay] = Field(default_factory=list)
+
+
 class VisitTaskResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
@@ -103,6 +119,7 @@ class VisitResponse(BaseModel):
     photo_start_url: str | None
     photo_end_url: str | None
     voice_note_url: str | None
+    voice_transcript: str | None = None
     tasks: list[VisitTaskResponse] = []
 
 
@@ -175,6 +192,8 @@ class WorkerAssignedElder(BaseModel):
     home_address: str
     home_latitude: float
     home_longitude: float
+    customer_name: str | None = None
+    customer_phone: str | None = None
     active_visit_id: int | None = None
     active_visit_started_at: datetime | None = None
     active_visit_status: VisitStatus | None = None
@@ -195,3 +214,15 @@ class WorkerDailySummaryResponse(BaseModel):
 
     completed_visits_today: int
     completed_emergencies_today: int
+
+
+class VisitLiveStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    visit: VisitResponse
+    worker_latitude: float | None = None
+    worker_longitude: float | None = None
+    destination_latitude: float | None = None
+    destination_longitude: float | None = None
+    eta_minutes: int | None = None
+    distance_km: float | None = None

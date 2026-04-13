@@ -23,13 +23,14 @@ from app.schemas.emergency import (
     EmergencyStageUpdateRequest,
     EmergencyTriggerRequest,
 )
+from app.services.communications import get_admin_alert_emails, queue_email, queue_sms
 from app.services.notification import connection_manager
 from app.services.subscription import customer_has_active_subscription_for_location
 from app.tasks.celery_app import dispatch_task
 
 
 EMERGENCY_RELATIONSHIP_OPTIONS = (
-    selectinload(EmergencyLog.elder),
+    selectinload(EmergencyLog.elder).selectinload(Elder.customer),
     selectinload(EmergencyLog.triggered_by),
     selectinload(EmergencyLog.assigned_worker),
     selectinload(EmergencyLog.responder),
@@ -240,6 +241,35 @@ def _build_emergency_payload(log: EmergencyLog, elder: Elder, message: str, *, e
     }
 
 
+def _queue_resolved_customer_notifications(log: EmergencyLog) -> None:
+    customer = log.elder.customer if log.elder and log.elder.customer else None
+    if customer is None:
+        return
+    location_address = log.location_address or "your location"
+    worker_name = log.assigned_worker_name or "Assigned worker"
+    charge_amount = float(log.service_fee_amount)
+    queue_email(
+        recipients=[customer.email],
+        subject="ELDERLY SOS resolved summary",
+        text_body=(
+            f"Hi {customer.full_name},\n\n"
+            f"Your SOS for {location_address} has been marked resolved.\n"
+            f"Worker on duty: {worker_name}\n"
+            f"Charge due: Rs. {charge_amount:.0f}\n\n"
+            "If you don't clear this amount by next 7 days your next visits will be paused till you clear the pending SOS amount.\n\n"
+            "You can review and pay this charge from the customer portal.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    queue_sms(
+        recipients=[customer.phone_number],
+        body=(
+            f"ELDERLY: SOS resolved for {location_address}. "
+            f"Charge due Rs. {charge_amount:.0f}. Please clear within 7 days."
+        ),
+    )
+
+
 async def _load_emergency_with_updates(session: AsyncSession, alert_id: int) -> EmergencyLog:
     result = await session.execute(
         select(EmergencyLog)
@@ -369,6 +399,8 @@ async def trigger_emergency(
 
     await session.commit()
     log = await _load_emergency_with_updates(session, log.id)
+    customer_result = await session.execute(select(User).where(User.id == anchor.customer_id))
+    location_customer = customer_result.scalar_one_or_none()
 
     admin_payload = _build_emergency_payload(log, anchor, payload.message, event_type="emergency")
     await connection_manager.broadcast_admin(admin_payload)
@@ -381,6 +413,37 @@ async def trigger_emergency(
         "app.tasks.emergency.dispatch_high_priority_alert",
         kwargs={"alert_id": log.id, "user_id": anchor.customer_id, "message": payload.message},
     )
+    queue_email(
+        recipients=get_admin_alert_emails(),
+        subject="ELDERLY SOS triggered",
+        text_body=(
+            f"An SOS has been triggered for {anchor.home_address}.\n"
+            f"Elders at location: {elder_names}\n"
+            f"Triggered by: {user.full_name}\n"
+            f"Message: {payload.message}\n"
+            f"Workers notified: {len(log.worker_candidates)}"
+        ),
+    )
+    if location_customer is not None:
+        queue_email(
+            recipients=[location_customer.email],
+            subject="ELDERLY SOS received",
+            text_body=(
+                f"Hi {location_customer.full_name},\n\n"
+                f"We have received your SOS for {anchor.home_address}.\n"
+                f"Elders at location: {elder_names}\n"
+                f"Workers notified: {len(log.worker_candidates)}\n\n"
+                "You can track the live status in the customer portal.\n\n"
+                "Thank you,\nELDERLY"
+            ),
+        )
+        queue_sms(
+            recipients=[location_customer.phone_number],
+            body=(
+                f"ELDERLY SOS received for {anchor.home_address}. "
+                f"{len(log.worker_candidates)} worker(s) notified."
+            ),
+        )
     for candidate in log.worker_candidates:
         await connection_manager.notify_worker(
             candidate.worker_id,
@@ -394,6 +457,26 @@ async def trigger_emergency(
             "app.tasks.emergency.dispatch_high_priority_alert",
             kwargs={"alert_id": log.id, "user_id": candidate.worker_id, "message": payload.message},
         )
+        if candidate.worker is not None:
+            queue_email(
+                recipients=[candidate.worker.email],
+                subject="ELDERLY SOS duty alert",
+                text_body=(
+                    f"Hi {candidate.worker.full_name},\n\n"
+                    f"A new SOS has been triggered near you for {anchor.home_address}.\n"
+                    f"Elders at location: {elder_names}\n"
+                    f"Distance: {candidate.distance_km:.2f} km\n\n"
+                    "Please open the worker portal immediately to accept the duty if you are available.\n\n"
+                    "Thank you,\nELDERLY"
+                ),
+            )
+            queue_sms(
+                recipients=[candidate.worker.phone_number],
+                body=(
+                    f"ELDERLY SOS alert near {anchor.home_address}. "
+                    "Open the worker portal now if you can accept."
+                ),
+            )
     return log
 
 
@@ -464,8 +547,28 @@ async def update_emergency_stage(
                     "siren": False,
                 },
             )
+        if elder is not None and elder.customer is not None and log.assigned_worker is not None:
+            queue_email(
+                recipients=[elder.customer.email],
+                subject="ELDERLY SOS accepted by worker",
+                text_body=(
+                    f"Hi {elder.customer.full_name},\n\n"
+                    f"Your SOS for {elder.home_address} has been accepted by {log.assigned_worker.full_name}.\n"
+                    f"Worker phone: {log.assigned_worker.phone_number or 'Will be available in app'}\n\n"
+                    "You can track the live emergency status in the customer portal.\n\n"
+                    "Thank you,\nELDERLY"
+                ),
+            )
+            queue_sms(
+                recipients=[elder.customer.phone_number],
+                body=(
+                    f"ELDERLY: {log.assigned_worker.full_name} accepted your SOS for {elder.home_address}."
+                ),
+            )
     elif log.assigned_worker_id is not None:
         await connection_manager.notify_worker(log.assigned_worker_id, {**broadcast_payload, "siren": False})
+    if payload.stage == EmergencyStage.RESOLVED:
+        _queue_resolved_customer_notifications(log)
     return log
 
 
@@ -491,7 +594,9 @@ async def resolve_emergency(
         updated_by_id=admin.id,
     )
     await session.commit()
-    return await _load_emergency_with_updates(session, log.id)
+    log = await _load_emergency_with_updates(session, log.id)
+    _queue_resolved_customer_notifications(log)
+    return log
 
 
 async def list_emergencies_for_user(session: AsyncSession, user: User) -> list[EmergencyLog]:
@@ -546,6 +651,25 @@ async def pay_resolved_emergencies_for_location(
         log.service_fee_paid_at = paid_at
         total += float(log.service_fee_amount)
     await session.commit()
+    queue_email(
+        recipients=[customer.email],
+        subject="ELDERLY SOS payment received",
+        text_body=(
+            f"Hi {customer.full_name},\n\n"
+            f"We received your SOS payment for {payload.location_address}.\n"
+            f"Resolved SOS covered: {len(matching_logs)}\n"
+            f"Total paid: Rs. {total:.0f}\n\n"
+            "Thank you for clearing the pending SOS charges.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    queue_sms(
+        recipients=[customer.phone_number],
+        body=(
+            f"ELDERLY: SOS payment received for {payload.location_address}. "
+            f"Paid Rs. {total:.0f}."
+        ),
+    )
     return EmergencyPaymentResponse(
         location_address=payload.location_address,
         paid_alert_count=len(matching_logs),

@@ -18,6 +18,7 @@ from app.schemas.subscription import (
     SubscriptionPlanSummary,
     SubscriptionQuoteResponse,
 )
+from app.services.communications import queue_email
 
 
 SERVICE_CATALOG = [
@@ -229,7 +230,26 @@ async def create_subscription(
         .where(Subscription.id.in_(created_ids))
         .order_by(Subscription.created_at.desc())
     )
-    return list(result.scalars().all())
+    created = list(result.scalars().all())
+    elder_names = [
+        item.elder.full_name
+        for item in created
+        if item.elder is not None
+    ]
+    queue_email(
+        recipients=[customer.email],
+        subject=f"ELDERLY subscription confirmed: {quote.service_tier_name}",
+        text_body=(
+            f"Hi {customer.full_name},\n\n"
+            f"Your {quote.service_tier_name} subscription is now active.\n"
+            f"Locations covered: {len({ _normalize_address(item.elder.home_address) for item in created if item.elder })}\n"
+            f"Elders included: {', '.join(elder_names)}\n"
+            f"Total amount: Rs. {quote.total_price:.0f}\n\n"
+            "You can review your plan details anytime from the customer portal.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    return created
 
 
 async def list_customer_subscriptions(session: AsyncSession, customer: User) -> list[Subscription]:

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, ArrowRight, CirclePlus, Info, MapPin, Pencil, Siren, UserRoundCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, CirclePlus, Gift, Info, MapPin, Pencil, Share2, Siren, UserRoundCheck } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import ModalDialog from "../../components/app/ModalDialog";
@@ -351,6 +351,20 @@ export default function CustomerDashboard() {
     );
   };
 
+  const shareReferral = async () => {
+    const message = `I use ELDERLY to coordinate senior care and emergency support. Join with my referral code ELDERLY-${user?.id || "CARE"}.`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "ELDERLY Referral", text: message, url: window.location.origin });
+        return;
+      } catch {
+        // fall through to clipboard copy
+      }
+    }
+    await navigator.clipboard.writeText(`${message} ${window.location.origin}`);
+    toast.success("Referral message copied. Share it with your contacts.");
+  };
+
   return (
     <div className="space-y-4 overflow-hidden">
       <section className="rounded-[1.75rem] border border-emerald-100 bg-white/90 p-4 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
@@ -416,6 +430,21 @@ export default function CustomerDashboard() {
               Subscription Details
             </button>
           ) : null}
+          <Link
+            to="/customer/celebrations"
+            className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-medium text-cyan-700 transition hover:bg-cyan-100"
+          >
+            <Gift size={16} />
+            Celebration Visits
+          </Link>
+          <button
+            type="button"
+            onClick={shareReferral}
+            className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
+          >
+            <Share2 size={16} />
+            Refer
+          </button>
           {totalUnpaidSosAmount > 0 ? (
             <button
               type="button"

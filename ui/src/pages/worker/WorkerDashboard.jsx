@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BellRing, Siren } from "lucide-react";
+import { BellRing, CalendarClock, MapPinned, Phone, Siren } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -77,6 +77,121 @@ function MetricCard({ label, value, hint }) {
   );
 }
 
+const WEEK_DAYS = [
+  { value: 0, label: "Mon" },
+  { value: 1, label: "Tue" },
+  { value: 2, label: "Wed" },
+  { value: 3, label: "Thu" },
+  { value: 4, label: "Fri" },
+  { value: 5, label: "Sat" },
+  { value: 6, label: "Sun" },
+];
+
+function WorkerShiftManager({ initialShifts, onSave }) {
+  const [shifts, setShifts] = useState(
+    WEEK_DAYS.map((day) => {
+      const existing = initialShifts.find((item) => item.day_of_week === day.value);
+      return (
+        existing || {
+          day_of_week: day.value,
+          is_active: false,
+          start_time: "09:00:00",
+          end_time: "18:00:00",
+        }
+      );
+    })
+  );
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setShifts(
+      WEEK_DAYS.map((day) => {
+        const existing = initialShifts.find((item) => item.day_of_week === day.value);
+        return (
+          existing || {
+            day_of_week: day.value,
+            is_active: false,
+            start_time: "09:00:00",
+            end_time: "18:00:00",
+          }
+        );
+      })
+    );
+  }, [initialShifts]);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3">
+        {WEEK_DAYS.map((day) => {
+          const shift = shifts.find((item) => item.day_of_week === day.value);
+          return (
+            <div key={day.value} className="grid grid-cols-[0.9fr_0.8fr_0.8fr_auto] items-center gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+              <p className="font-semibold text-slate-900">{day.label}</p>
+              <input
+                type="time"
+                value={(shift?.start_time || "09:00:00").slice(0, 5)}
+                disabled={!shift?.is_active}
+                onChange={(event) =>
+                  setShifts((current) =>
+                    current.map((item) =>
+                      item.day_of_week === day.value ? { ...item, start_time: `${event.target.value}:00` } : item
+                    )
+                  )
+                }
+                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none disabled:bg-slate-100"
+              />
+              <input
+                type="time"
+                value={(shift?.end_time || "18:00:00").slice(0, 5)}
+                disabled={!shift?.is_active}
+                onChange={(event) =>
+                  setShifts((current) =>
+                    current.map((item) =>
+                      item.day_of_week === day.value ? { ...item, end_time: `${event.target.value}:00` } : item
+                    )
+                  )
+                }
+                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none disabled:bg-slate-100"
+              />
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(shift?.is_active)}
+                  onChange={(event) =>
+                    setShifts((current) =>
+                      current.map((item) =>
+                        item.day_of_week === day.value ? { ...item, is_active: event.target.checked } : item
+                      )
+                    )
+                  }
+                />
+                Active
+              </label>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true);
+            try {
+              await onSave(shifts);
+            } finally {
+              setSaving(false);
+            }
+          }}
+          className="rounded-2xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-600 disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save Shifts"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function WorkerDashboard() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -94,6 +209,8 @@ export default function WorkerDashboard() {
   const [availabilitySaving, setAvailabilitySaving] = useState(false);
   const [availableForDispatch, setAvailableForDispatch] = useState(user?.available_for_dispatch ?? true);
   const [sosAttention, setSosAttention] = useState(false);
+  const [workerShifts, setWorkerShifts] = useState([]);
+  const [currentCoords, setCurrentCoords] = useState(null);
   const audioContextRef = useRef(null);
   const sirenTimerRef = useRef(null);
   const audioUnlockedRef = useRef(false);
@@ -186,11 +303,12 @@ export default function WorkerDashboard() {
   }, [ensureAudioReady]);
 
   const load = async () => {
-    const [eldersResult, activeVisitResult, emergencyResult, summaryResult] = await Promise.allSettled([
+    const [eldersResult, activeVisitResult, emergencyResult, summaryResult, shiftsResult] = await Promise.allSettled([
       apiClient.get("/visits/assigned-elders"),
       apiClient.get("/visits/active"),
       apiClient.get("/emergency/history"),
       apiClient.get("/reports/worker/daily"),
+      apiClient.get("/visits/worker/shifts"),
     ]);
 
     setElders(eldersResult.status === "fulfilled" ? eldersResult.value.data : []);
@@ -200,6 +318,7 @@ export default function WorkerDashboard() {
         ? summaryResult.value.data
         : { completed_visits_today: 0, completed_emergencies_today: 0 }
     );
+    setWorkerShifts(shiftsResult.status === "fulfilled" ? shiftsResult.value.data : []);
     if (emergencyResult.status === "fulfilled") {
       const latestOpen = emergencyResult.value.data.find((item) => item.status === "PENDING");
       setActiveEmergency(latestOpen || null);
@@ -279,20 +398,26 @@ export default function WorkerDashboard() {
 
   useEffect(() => {
     if (user?.available_for_dispatch == null) return;
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        try {
-          await apiClient.post("/visits/worker-status", {
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            available_for_dispatch: user.available_for_dispatch,
-          });
-        } catch {
-          // Best-effort presence update only.
-        }
-      },
-      () => {}
-    );
+    const pushLocation = () => {
+      navigator.geolocation.getCurrentPosition(
+        async ({ coords }) => {
+          setCurrentCoords({ latitude: coords.latitude, longitude: coords.longitude });
+          try {
+            await apiClient.post("/visits/worker-status", {
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              available_for_dispatch: user.available_for_dispatch,
+            });
+          } catch {
+            // Best-effort presence update only.
+          }
+        },
+        () => {}
+      );
+    };
+    pushLocation();
+    const intervalId = setInterval(pushLocation, 30000);
+    return () => clearInterval(intervalId);
   }, [user?.available_for_dispatch]);
 
   useEffect(() => {
@@ -314,6 +439,25 @@ export default function WorkerDashboard() {
     () => elders.find((elder) => elder.elder_id === selectedLocationId) || null,
     [elders, selectedLocationId]
   );
+
+  const selectedLocationEta = useMemo(() => {
+    if (!selectedLocation || !currentCoords) return null;
+    const toRadians = (value) => (value * Math.PI) / 180;
+    const earthRadiusKm = 6371;
+    const dLat = toRadians(selectedLocation.home_latitude - currentCoords.latitude);
+    const dLon = toRadians(selectedLocation.home_longitude - currentCoords.longitude);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRadians(currentCoords.latitude)) *
+        Math.cos(toRadians(selectedLocation.home_latitude)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const distanceKm = 2 * earthRadiusKm * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return {
+      distanceKm: distanceKm.toFixed(1),
+      etaMinutes: Math.max(2, Math.round((distanceKm / 20) * 60)),
+    };
+  }, [currentCoords, selectedLocation]);
 
   const openStartFlow = (elder) => {
     setPendingStart(elder);
@@ -476,6 +620,14 @@ export default function WorkerDashboard() {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                onClick={() => setSelectedPanel("shifts")}
+                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                <CalendarClock size={15} />
+                Manage Shifts
+              </button>
+              <button
+                type="button"
                 onClick={toggleAvailability}
                 disabled={availabilitySaving}
                 className={`rounded-2xl px-3 py-2 text-sm font-medium transition ${
@@ -518,6 +670,26 @@ export default function WorkerDashboard() {
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
+                        {elder.customer_phone ? (
+                          <a
+                            href={`tel:${elder.customer_phone}`}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
+                          >
+                            <Phone size={15} />
+                            Call
+                          </a>
+                        ) : null}
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                            `${elder.home_latitude},${elder.home_longitude}`
+                          )}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-700 transition hover:bg-cyan-100"
+                        >
+                          <MapPinned size={15} />
+                          Navigate
+                        </a>
                         <button
                           type="button"
                           onClick={() => {
@@ -592,8 +764,36 @@ export default function WorkerDashboard() {
               <p className="text-base font-semibold text-slate-900">{selectedLocation.home_address}</p>
               <p className="mt-2 text-sm text-slate-600">{selectedLocation.elder_names.join(", ")}</p>
               <p className="mt-1 text-sm text-slate-600">Pod: {selectedLocation.pod_name || "Unassigned pod"}</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Customer: {selectedLocation.customer_name || "Unknown"}{selectedLocation.customer_phone ? ` | ${selectedLocation.customer_phone}` : ""}
+              </p>
+              {selectedLocationEta ? (
+                <p className="mt-1 text-sm text-slate-600">
+                  Live ETA: {selectedLocationEta.etaMinutes} mins | {selectedLocationEta.distanceKm} km away
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-3">
+              {selectedLocation.customer_phone ? (
+                <a
+                  href={`tel:${selectedLocation.customer_phone}`}
+                  className="inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                >
+                  <Phone size={16} />
+                  Call Customer
+                </a>
+              ) : null}
+              <a
+                href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                  `${selectedLocation.home_latitude},${selectedLocation.home_longitude}`
+                )}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 font-semibold text-cyan-700 transition hover:bg-cyan-100"
+              >
+                <MapPinned size={16} />
+                Open Navigation
+              </a>
               {selectedLocation.active_visit_id ? (
                 <button
                   type="button"
@@ -614,6 +814,18 @@ export default function WorkerDashboard() {
             </div>
           </div>
         ) : null}
+      </ModalDialog>
+
+      <ModalDialog open={selectedPanel === "shifts"} title="Shift Management" onClose={() => setSelectedPanel("")}>
+        <WorkerShiftManager
+          initialShifts={workerShifts}
+          onSave={async (shifts) => {
+            await apiClient.put("/visits/worker/shifts", { shifts });
+            toast.success("Weekly shifts updated.");
+            await load();
+            setSelectedPanel("");
+          }}
+        />
       </ModalDialog>
 
       <ModalDialog open={selectedPanel === "emergency"} title="SOS Duty Details" onClose={() => setSelectedPanel("")}>

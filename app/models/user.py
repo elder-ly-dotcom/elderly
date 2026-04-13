@@ -65,6 +65,18 @@ class User(Base):
         foreign_keys="EmergencyWorkerCandidate.worker_id",
     )
     visit_images: Mapped[list["VisitImage"]] = relationship(back_populates="uploaded_by")
+    worker_shifts: Mapped[list["WorkerShift"]] = relationship(
+        back_populates="worker",
+        cascade="all, delete-orphan",
+    )
+    occasion_bookings: Mapped[list["OccasionBooking"]] = relationship(
+        back_populates="customer",
+        foreign_keys="OccasionBooking.customer_id",
+    )
+    assigned_occasion_bookings: Mapped[list["OccasionBooking"]] = relationship(
+        back_populates="assigned_worker",
+        foreign_keys="OccasionBooking.assigned_worker_id",
+    )
 
     @property
     def is_active_today(self) -> bool:
@@ -75,3 +87,5 @@ class User(Base):
 
 # Ensure the emergency model is registered even when User is imported first.
 from app.models import emergency as _emergency  # noqa: E402,F401
+from app.models import occasion as _occasion  # noqa: E402,F401
+from app.models import worker_shift as _worker_shift  # noqa: E402,F401

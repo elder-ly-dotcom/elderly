@@ -3,6 +3,7 @@ import {
   Bell,
   CalendarDays,
   CreditCard,
+  Gift,
   Home,
   LogOut,
   MapPinned,
@@ -11,7 +12,6 @@ import {
   UserCircle2,
   Users,
   UserSearch,
-  Wrench,
   X,
 } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
@@ -24,6 +24,7 @@ const iconMap = {
   profile: UserCircle2,
   elders: UserCircle2,
   subscriptions: CreditCard,
+  celebrations: Gift,
   visits: CalendarDays,
   safety: ShieldAlert,
   workers: Users,
