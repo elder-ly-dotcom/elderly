@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import apiClient from "../../lib/apiClient";
+import ModalDialog from "../../components/app/ModalDialog";
 
 function statusTone(status) {
   if (status === "In Progress") return "bg-cyan-100 text-cyan-700";
@@ -11,6 +12,7 @@ function statusTone(status) {
 
 export default function VisitBookings() {
   const [bookings, setBookings] = useState([]);
+  const [liveStatus, setLiveStatus] = useState(null);
 
   useEffect(() => {
     apiClient.get("/visits/customer/upcoming").then((response) => setBookings(response.data));
@@ -40,12 +42,51 @@ export default function VisitBookings() {
                 </div>
                 <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusTone(item.status_label)}`}>{item.status_label}</span>
               </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const response = await apiClient.get(`/visits/${item.visit.id}/live`);
+                    setLiveStatus(response.data);
+                  }}
+                  className="rounded-2xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-700 transition hover:bg-cyan-100"
+                >
+                  View Live ETA
+                </button>
+              </div>
             </div>
           ))
         ) : (
           <p className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">No visit bookings yet.</p>
         )}
       </div>
+
+      <ModalDialog
+        open={Boolean(liveStatus)}
+        title="Worker Live Status"
+        onClose={() => setLiveStatus(null)}
+      >
+        {liveStatus ? (
+          <div className="space-y-4">
+            <div className="rounded-3xl border border-cyan-200 bg-cyan-50 p-4">
+              <p className="text-sm text-cyan-700">Current trip status</p>
+              <p className="mt-1 text-xl font-semibold text-slate-900">
+                {liveStatus.eta_minutes ? `${liveStatus.eta_minutes} mins away` : "ETA will appear when the worker is moving"}
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                Distance: {liveStatus.distance_km != null ? `${liveStatus.distance_km} km` : "Unknown"}
+              </p>
+            </div>
+            <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm text-slate-500">Location</p>
+              <p className="mt-1 text-base font-semibold text-slate-900">{liveStatus.visit.location_address_snapshot || liveStatus.visit.elder_name}</p>
+              <p className="mt-2 text-sm text-slate-600">
+                Worker coordinates: {liveStatus.worker_latitude || "NA"}, {liveStatus.worker_longitude || "NA"}
+              </p>
+            </div>
+          </div>
+        ) : null}
+      </ModalDialog>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import asyncio
 import base64
 import math
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -20,6 +20,7 @@ from app.models.subscription import Subscription
 from app.models.emergency import EmergencyLog, EmergencyStatus
 from app.models.user import Role, User
 from app.models.visit import Visit, VisitImage, VisitStatus, VisitTask
+from app.models.worker_shift import WorkerShift
 from app.schemas.visit import (
     AdminVisitRequestItem,
     CustomerVisitUsageResponse,
@@ -29,6 +30,7 @@ from app.schemas.visit import (
     VisitRequestCreate,
     VisitResponse,
     VisitScheduleRequest,
+    VisitLiveStatusResponse,
     VisitSlotOption,
     VisitSummaryItem,
     VisitSummaryResponse,
@@ -36,8 +38,11 @@ from app.schemas.visit import (
     WorkerDailySummaryResponse,
     WorkerAssignedElder,
     WorkerDispatchStatusUpdate,
+    WorkerShiftDay,
+    WorkerShiftUpdateRequest,
 )
 from app.services.audit import log_audit_event
+from app.services.communications import queue_email, queue_sms
 from app.services.notification import connection_manager, send_high_priority_alert
 
 
@@ -131,6 +136,22 @@ def _visit_overlaps(
         return False
     effective_end = existing_end or (existing_start + timedelta(hours=VISIT_SLOT_DURATION_HOURS))
     return existing_start < proposed_end and proposed_start < effective_end
+
+
+def _worker_is_available_in_shift(worker: User, slot_start: datetime, slot_end: datetime) -> bool:
+    if not getattr(worker, "worker_shifts", None):
+        return True
+    local_start = slot_start.astimezone(LOCAL_TZ)
+    local_end = slot_end.astimezone(LOCAL_TZ)
+    if local_start.date() != local_end.date():
+        return False
+    weekday = local_start.weekday()
+    for shift in worker.worker_shifts:
+        if not shift.is_active or shift.day_of_week != weekday:
+            continue
+        if shift.start_time <= local_start.time() and shift.end_time >= local_end.time():
+            return True
+    return False
 
 
 async def _get_location_elders_for_customer(
@@ -241,6 +262,74 @@ async def update_worker_dispatch_status(
     return worker
 
 
+async def list_worker_shifts(session: AsyncSession, *, worker: User) -> list[WorkerShift]:
+    result = await session.execute(
+        select(WorkerShift).where(WorkerShift.worker_id == worker.id).order_by(WorkerShift.day_of_week.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def replace_worker_shifts(
+    session: AsyncSession,
+    *,
+    worker: User,
+    payload: WorkerShiftUpdateRequest,
+) -> list[WorkerShift]:
+    existing = await list_worker_shifts(session, worker=worker)
+    for item in existing:
+        await session.delete(item)
+
+    next_rows: list[WorkerShift] = []
+    for item in payload.shifts:
+        shift = WorkerShift(
+            worker_id=worker.id,
+            day_of_week=item.day_of_week,
+            is_active=item.is_active,
+            start_time=item.start_time,
+            end_time=item.end_time,
+        )
+        session.add(shift)
+        next_rows.append(shift)
+    await session.commit()
+    return await list_worker_shifts(session, worker=worker)
+
+
+async def get_visit_live_status(
+    session: AsyncSession,
+    *,
+    visit_id: int,
+    customer: User,
+) -> VisitLiveStatusResponse:
+    result = await session.execute(
+        select(Visit)
+        .options(*VISIT_RELATIONSHIP_OPTIONS, selectinload(Visit.elder).selectinload(Elder.customer))
+        .where(Visit.id == visit_id)
+    )
+    visit = result.scalar_one_or_none()
+    if visit is None or visit.elder.customer_id != customer.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visit not found")
+
+    worker_lat = visit.worker.current_latitude if visit.worker else None
+    worker_lon = visit.worker.current_longitude if visit.worker else None
+    destination_lat = visit.elder.home_latitude if visit.elder else None
+    destination_lon = visit.elder.home_longitude if visit.elder else None
+    eta_minutes = None
+    distance_km = None
+    if worker_lat is not None and worker_lon is not None and destination_lat is not None and destination_lon is not None:
+        distance_km = _haversine_km(worker_lat, worker_lon, destination_lat, destination_lon)
+        eta_minutes = max(2, int(round((distance_km / 20) * 60))) if distance_km is not None else None
+
+    return VisitLiveStatusResponse(
+        visit=VisitResponse.model_validate(visit),
+        worker_latitude=worker_lat,
+        worker_longitude=worker_lon,
+        destination_latitude=destination_lat,
+        destination_longitude=destination_lon,
+        eta_minutes=eta_minutes,
+        distance_km=round(distance_km, 2) if distance_km is not None else None,
+    )
+
+
 async def request_visit_dispatch(
     session: AsyncSession,
     *,
@@ -269,19 +358,7 @@ async def request_visit_dispatch(
     if existing_pending:
         return existing_pending
 
-    workers_result = await session.execute(
-        select(User)
-        .where(
-            User.role == Role.WORKER,
-            User.is_active.is_(True),
-            User.is_verified.is_(True),
-            User.available_for_dispatch.is_(True),
-            User.current_latitude.is_not(None),
-            User.current_longitude.is_not(None),
-        )
-        .order_by(User.location_updated_at.desc())
-    )
-    workers = workers_result.scalars().all()
+    workers = await _get_dispatch_ready_workers(session)
 
     if not workers:
         raise HTTPException(
@@ -298,6 +375,9 @@ async def request_visit_dispatch(
     nearest_distance_km: float | None = None
     for worker in workers:
         if worker.id in busy_worker_ids:
+            continue
+        now = datetime.now(UTC)
+        if not _worker_is_available_in_shift(worker, now, now + timedelta(hours=VISIT_SLOT_DURATION_HOURS)):
             continue
         distance_km = _haversine_km(
             elder.home_latitude,
@@ -367,6 +447,7 @@ async def request_visit_dispatch(
 async def _get_dispatch_ready_workers(session: AsyncSession) -> list[User]:
     workers_result = await session.execute(
         select(User)
+        .options(selectinload(User.worker_shifts))
         .where(
             User.role == Role.WORKER,
             User.is_active.is_(True),
@@ -414,6 +495,8 @@ async def _find_available_workers_for_slot(
     ranked_workers: list[tuple[User, float]] = []
     for worker in workers:
         if worker.id in busy_workers:
+            continue
+        if not _worker_is_available_in_shift(worker, slot_start, slot_end):
             continue
         distance_km = _haversine_km(latitude, longitude, worker.current_latitude, worker.current_longitude)
         if distance_km > DISPATCH_RADIUS_KM:
@@ -525,6 +608,41 @@ async def schedule_visit_request(
         },
     )
     await send_high_priority_alert(assigned_worker.id, f"New upcoming visit on {_slot_label(slot_start)}")
+    slot_label = _slot_label(slot_start)
+    location_label = anchor.home_address
+    elder_names = ", ".join(item.full_name for item in location_elders)
+    queue_email(
+        recipients=[customer.email],
+        subject=f"ELDERLY visit booked for {slot_label}",
+        text_body=(
+            f"Hi {customer.full_name},\n\n"
+            f"Your visit has been booked for {slot_label}.\n"
+            f"Location: {location_label}\n"
+            f"Elders at location: {elder_names}\n"
+            f"Assigned worker: {assigned_worker.full_name}\n"
+            f"Worker phone: {assigned_worker.phone_number or 'Will be updated in app'}\n\n"
+            "You can track the booking status from the customer portal.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    queue_email(
+        recipients=[assigned_worker.email],
+        subject=f"ELDERLY upcoming visit assigned for {slot_label}",
+        text_body=(
+            f"Hi {assigned_worker.full_name},\n\n"
+            f"You have been assigned an upcoming visit for {slot_label}.\n"
+            f"Customer: {customer.full_name}\n"
+            f"Customer phone: {customer.phone_number or 'Not available'}\n"
+            f"Location: {location_label}\n"
+            f"Elders at location: {elder_names}\n\n"
+            "Please check the worker portal for full details.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    queue_sms(
+        recipients=[customer.phone_number],
+        body=f"ELDERLY: Visit booked for {slot_label} at {location_label}.",
+    )
     return visit
 
 
@@ -740,6 +858,7 @@ async def check_in_visit(
 async def list_assigned_elders(session: AsyncSession, worker: User) -> list[WorkerAssignedElder]:
     result = await session.execute(
         select(Elder)
+        .options(selectinload(Elder.customer))
         .where(Elder.assigned_worker_id == worker.id)
         .order_by(Elder.full_name.asc())
     )
@@ -783,6 +902,8 @@ async def list_assigned_elders(session: AsyncSession, worker: User) -> list[Work
                 home_address=representative.home_address,
                 home_latitude=representative.home_latitude,
                 home_longitude=representative.home_longitude,
+                customer_name=representative.customer.full_name if representative.customer else None,
+                customer_phone=representative.customer.phone_number if representative.customer else None,
                 active_visit_id=active_visit.id if active_visit else None,
                 active_visit_started_at=active_visit.check_in_time if active_visit else None,
                 active_visit_status=active_visit.status if active_visit else None,
@@ -843,6 +964,7 @@ async def end_visit(
     visit.notes = payload.notes
     visit.mood_photo_url = payload.mood_photo_url
     visit.voice_note_url = payload.voice_note_url
+    visit.voice_transcript = payload.voice_transcript
     visit.status = VisitStatus.COMPLETED
     visit.tasks.clear()
     for item in payload.tasks:

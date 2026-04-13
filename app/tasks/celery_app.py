@@ -9,4 +9,4 @@ celery_app = Celery(
     backend=settings.REDIS_URL,
 )
 celery_app.conf.broker_connection_retry_on_startup = True
-celery_app.conf.imports = ("app.tasks.sos", "app.tasks.emergency")
+celery_app.conf.imports = ("app.tasks.sos", "app.tasks.emergency", "app.tasks.communications")

@@ -15,10 +15,13 @@ from app.schemas.visit import (
     VisitResponse,
     VisitScheduleRequest,
     VisitSlotOption,
+    VisitLiveStatusResponse,
     VisitVerifyResponse,
     WorkerUpcomingVisitItem,
     WorkerAssignedElder,
     WorkerDispatchStatusUpdate,
+    WorkerShiftDay,
+    WorkerShiftUpdateRequest,
 )
 from app.services.elder import get_elder_by_id
 from app.services.visit import (
@@ -26,10 +29,13 @@ from app.services.visit import (
     end_visit,
     get_active_visit_for_worker,
     get_visit_booking_details,
+    get_visit_live_status,
     list_assigned_elders,
     list_available_visit_slots,
     list_customer_scheduled_visits,
+    list_worker_shifts,
     list_worker_upcoming_visits,
+    replace_worker_shifts,
     request_visit_dispatch,
     schedule_visit_request,
     update_worker_dispatch_status,
@@ -150,6 +156,41 @@ async def worker_upcoming_visits(
     return await list_worker_upcoming_visits(db, worker=worker)
 
 
+@router.get("/worker/shifts", response_model=list[WorkerShiftDay])
+async def worker_shifts(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    worker: Annotated[User, Depends(require_roles(Role.WORKER))],
+) -> list[WorkerShiftDay]:
+    rows = await list_worker_shifts(db, worker=worker)
+    return [
+        WorkerShiftDay(
+            day_of_week=row.day_of_week,
+            is_active=row.is_active,
+            start_time=row.start_time,
+            end_time=row.end_time,
+        )
+        for row in rows
+    ]
+
+
+@router.put("/worker/shifts", response_model=list[WorkerShiftDay])
+async def update_worker_shifts(
+    payload: WorkerShiftUpdateRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    worker: Annotated[User, Depends(require_roles(Role.WORKER))],
+) -> list[WorkerShiftDay]:
+    rows = await replace_worker_shifts(db, worker=worker, payload=payload)
+    return [
+        WorkerShiftDay(
+            day_of_week=row.day_of_week,
+            is_active=row.is_active,
+            start_time=row.start_time,
+            end_time=row.end_time,
+        )
+        for row in rows
+    ]
+
+
 @router.get("/{visit_id}/details", response_model=VisitBookingDetailsResponse)
 async def visit_details(
     visit_id: int,
@@ -159,6 +200,15 @@ async def visit_details(
     if user.role == Role.CUSTOMER:
         return await get_visit_booking_details(db, visit_id=visit_id, customer=user)
     return await get_visit_booking_details(db, visit_id=visit_id, worker=user)
+
+
+@router.get("/{visit_id}/live", response_model=VisitLiveStatusResponse)
+async def visit_live_status(
+    visit_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    customer: Annotated[User, Depends(require_roles(Role.CUSTOMER))],
+) -> VisitLiveStatusResponse:
+    return await get_visit_live_status(db, visit_id=visit_id, customer=customer)
 
 
 @router.post("/worker-status", response_model=dict[str, str])

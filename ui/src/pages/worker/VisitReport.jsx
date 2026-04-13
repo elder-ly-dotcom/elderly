@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Mic } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -18,6 +19,14 @@ export default function VisitReport() {
   const [voiceNote, setVoiceNote] = useState(null);
   const [endPhoto, setEndPhoto] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop?.();
+    };
+  }, []);
 
   const uploadFile = async (file) => {
     if (!file) return null;
@@ -48,6 +57,7 @@ export default function VisitReport() {
             notes,
             mood_photo_url: moodPhotoUrl,
             voice_note_url: voiceNoteUrl,
+            voice_transcript: notes,
             tasks,
           });
           toast.success("Visit completed. Peace-of-mind report sent.");
@@ -61,6 +71,34 @@ export default function VisitReport() {
         toast.error("Location permission is required to complete a visit.");
       }
     );
+  };
+
+  const startVoiceCapture = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error("Voice-to-text is not supported on this browser.");
+      return;
+    }
+    recognitionRef.current?.stop?.();
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-IN";
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setListening(true);
+    recognition.onerror = () => {
+      setListening(false);
+      toast.error("Voice capture could not start. Please try again.");
+    };
+    recognition.onend = () => setListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript;
+      if (transcript) {
+        setNotes((current) => `${current}${current ? "\n" : ""}${transcript}`.trim());
+        toast.success("Voice note converted into visit summary.");
+      }
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
   };
 
   return (
@@ -115,6 +153,14 @@ export default function VisitReport() {
           placeholder="Summarize how the elder is feeling today."
           className="min-h-32 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-cyan-300 focus:bg-white"
         />
+        <button
+          type="button"
+          onClick={startVoiceCapture}
+          className="inline-flex items-center gap-2 self-start rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm font-medium text-cyan-700 transition hover:bg-cyan-100"
+        >
+          <Mic size={15} />
+          {listening ? "Listening..." : "Voice-to-Text Summary"}
+        </button>
         <label className="block rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/60 p-4 text-sm text-slate-600">
           Upload mood photo
           <input
