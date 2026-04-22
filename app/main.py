@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from sqlalchemy.exc import SQLAlchemyError
@@ -10,6 +11,9 @@ from app.core.config import settings
 from app.core.logging import WorkerAuditMiddleware
 from app.db.session import AsyncSessionLocal
 from app.services.auth import ensure_admin_user
+
+UPLOADS_DIR = Path("uploads")
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -43,7 +47,7 @@ app.add_middleware(
 )
 app.add_middleware(WorkerAuditMiddleware)
 app.include_router(api_router, prefix=settings.API_V1_STR)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 
 @app.get("/health", tags=["health"])
