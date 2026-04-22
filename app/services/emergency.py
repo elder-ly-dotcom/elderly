@@ -24,7 +24,8 @@ from app.schemas.emergency import (
     EmergencyTriggerRequest,
 )
 from app.services.notification import connection_manager
-from app.tasks.celery_app import celery_app
+from app.services.subscription import customer_has_active_subscription_for_location
+from app.tasks.celery_app import dispatch_task
 
 
 EMERGENCY_RELATIONSHIP_OPTIONS = (
@@ -299,6 +300,15 @@ async def trigger_emergency(
 ) -> EmergencyLog:
     location_elders = await _resolve_location_elders(session, user=user, payload=payload)
     anchor = location_elders[0]
+    if user.role == Role.CUSTOMER and not await customer_has_active_subscription_for_location(
+        session,
+        customer=user,
+        location_address=anchor.home_address,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please subscribe to a care plan before triggering SOS for this location.",
+        )
     elder_names = ", ".join(item.full_name for item in location_elders)
 
     trigger_latitude = payload.latitude if payload.latitude is not None else anchor.home_latitude
@@ -367,7 +377,7 @@ async def trigger_emergency(
         admin_payload,
     )
 
-    celery_app.send_task(
+    dispatch_task(
         "app.tasks.emergency.dispatch_high_priority_alert",
         kwargs={"alert_id": log.id, "user_id": anchor.customer_id, "message": payload.message},
     )
@@ -380,7 +390,7 @@ async def trigger_emergency(
                 "candidate_status": candidate.status,
             },
         )
-        celery_app.send_task(
+        dispatch_task(
             "app.tasks.emergency.dispatch_high_priority_alert",
             kwargs={"alert_id": log.id, "user_id": candidate.worker_id, "message": payload.message},
         )

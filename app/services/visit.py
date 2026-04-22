@@ -39,6 +39,7 @@ from app.schemas.visit import (
 )
 from app.services.audit import log_audit_event
 from app.services.notification import connection_manager, send_high_priority_alert
+from app.services.subscription import customer_has_active_subscription_for_location
 
 
 VISIT_RELATIONSHIP_OPTIONS = (
@@ -254,6 +255,15 @@ async def request_visit_dispatch(
         location_address=payload.location_address,
     )
     elder = location_elders[0]
+    if not await customer_has_active_subscription_for_location(
+        session,
+        customer=customer,
+        location_address=elder.home_address,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please subscribe to a care plan before booking visits for this location.",
+        )
     location_elder_ids = [item.id for item in location_elders]
 
     existing_pending_result = await session.execute(
@@ -437,6 +447,15 @@ async def list_available_visit_slots(
         location_address=location_address,
     )
     anchor = location_elders[0]
+    if not await customer_has_active_subscription_for_location(
+        session,
+        customer=customer,
+        location_address=anchor.home_address,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please subscribe to a care plan before viewing visit slots for this location.",
+        )
     now_local = datetime.now(LOCAL_TZ)
     slots: list[VisitSlotOption] = []
     for day_offset in range(7):
@@ -480,6 +499,15 @@ async def schedule_visit_request(
         location_address=payload.location_address,
     )
     anchor = location_elders[0]
+    if not await customer_has_active_subscription_for_location(
+        session,
+        customer=customer,
+        location_address=anchor.home_address,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please subscribe to a care plan before scheduling visits for this location.",
+        )
     slot_start = payload.scheduled_start_time.astimezone(UTC)
     slot_end = slot_start + timedelta(hours=VISIT_SLOT_DURATION_HOURS)
 

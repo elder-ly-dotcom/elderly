@@ -260,6 +260,27 @@ async def get_customer_subscription_overview(
     )
 
 
+async def customer_has_active_subscription_for_location(
+    session: AsyncSession,
+    *,
+    customer: User,
+    location_address: str,
+) -> bool:
+    normalized_address = _normalize_address(location_address)
+    result = await session.execute(
+        select(Subscription)
+        .options(selectinload(Subscription.elder))
+        .where(
+            Subscription.customer_id == customer.id,
+            Subscription.status == "ACTIVE",
+        )
+    )
+    for subscription in result.scalars().all():
+        if subscription.elder and _normalize_address(subscription.elder.home_address) == normalized_address:
+            return True
+    return False
+
+
 async def get_subscription_metrics(session: AsyncSession) -> SubscriptionMetricsResponse:
     result = await session.execute(
         select(

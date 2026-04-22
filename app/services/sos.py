@@ -7,7 +7,7 @@ from app.models.elder import Elder
 from app.models.sos import SOSAlert
 from app.models.user import Role, User
 from app.services.audit import log_audit_event
-from app.tasks.celery_app import celery_app
+from app.tasks.celery_app import dispatch_task
 
 
 async def trigger_sos_alert(
@@ -44,8 +44,5 @@ async def trigger_sos_alert(
     await session.commit()
     await session.refresh(alert)
 
-    celery_app.send_task(
-        "app.tasks.sos.dispatch_sos_alert",
-        kwargs={"alert_id": alert.id},
-    )
+    dispatch_task("app.tasks.sos.dispatch_sos_alert", kwargs={"alert_id": alert.id})
     return alert

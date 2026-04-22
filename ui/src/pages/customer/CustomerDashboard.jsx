@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, CirclePlus, Info, MapPin, Siren, UserRoundCheck } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ArrowLeft, ArrowRight, CirclePlus, Info, MapPin, Pencil, Siren, UserRoundCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import ModalDialog from "../../components/app/ModalDialog";
@@ -48,6 +49,7 @@ function slotHourLabel(isoString) {
 
 export default function CustomerDashboard() {
   const user = useAuthStore((state) => state.user);
+  const navigate = useNavigate();
   const [elders, setElders] = useState([]);
   const [overview, setOverview] = useState(null);
   const [usage, setUsage] = useState(null);
@@ -63,6 +65,9 @@ export default function CustomerDashboard() {
   const [bookingPreview, setBookingPreview] = useState(null);
   const [selectedBookingDate, setSelectedBookingDate] = useState("");
   const [bookingDateWindowStart, setBookingDateWindowStart] = useState(0);
+  const [selectedElderForEdit, setSelectedElderForEdit] = useState(null);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => localStorage.getItem("customer-dashboard-onboarding-skipped") === "true");
 
   const load = async () => {
     const [eldersRes, overviewRes, usageRes, emergencyRes] = await Promise.allSettled([
@@ -139,6 +144,10 @@ export default function CustomerDashboard() {
     [elders]
   );
 
+  const hasElders = elders.length > 0;
+  const hasActivePlan = Boolean(overview?.has_active_plan && overview?.current_plan);
+  const shouldShowOnboarding = !onboardingDismissed && (!hasElders || !hasActivePlan);
+
   const emergencySummaryByLocation = useMemo(() => {
     const summary = {};
     for (const item of emergencies) {
@@ -162,6 +171,7 @@ export default function CustomerDashboard() {
     () => locations.find((location) => location.key === selectedLocationKey) || null,
     [locations, selectedLocationKey]
   );
+  const locationEditElder = selectedLocation?.elders?.[0] || null;
 
   const selectedEmergency = useMemo(
     () => emergencies.find((item) => item.id === selectedEmergencyId) || null,
@@ -253,7 +263,30 @@ export default function CustomerDashboard() {
     }
   }, [unpaidResolvedEmergencies.length, chargeNoticeShown]);
 
+  useEffect(() => {
+    if (onboardingDismissed) return;
+    if (!hasElders) {
+      setOnboardingStep(0);
+      return;
+    }
+    if (!hasActivePlan) {
+      setOnboardingStep(1);
+      return;
+    }
+    setOnboardingStep(2);
+  }, [hasActivePlan, hasElders, onboardingDismissed]);
+
+  const dismissOnboarding = () => {
+    localStorage.setItem("customer-dashboard-onboarding-skipped", "true");
+    setOnboardingDismissed(true);
+  };
+
   const openVisitScheduler = async (location) => {
+    if (!hasActivePlan) {
+      toast.info("Take a subscription first to unlock visit booking for this location.");
+      navigate("/customer/subscriptions");
+      return;
+    }
     setBusyAction(`visit-${location.key}`);
     try {
       const response = await apiClient.get("/visits/slots", {
@@ -270,12 +303,19 @@ export default function CustomerDashboard() {
         setBookingDateWindowStart(0);
       }
       setSelectedPanel("visit-slots");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Unable to load visit slots right now.");
     } finally {
       setBusyAction("");
     }
   };
 
   const triggerReverseSOS = (location) => {
+    if (!hasActivePlan) {
+      toast.info("Take a subscription first to unlock SOS support for this location.");
+      navigate("/customer/subscriptions");
+      return;
+    }
     setBusyAction(`sos-${location.key}`);
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
@@ -288,6 +328,8 @@ export default function CustomerDashboard() {
           });
           toast.error("Reverse SOS sent to admin and the nearest worker.");
           await load();
+        } catch (error) {
+          toast.error(error?.response?.data?.detail || "Unable to trigger SOS right now.");
         } finally {
           setBusyAction("");
         }
@@ -300,6 +342,8 @@ export default function CustomerDashboard() {
           });
           toast.error("Reverse SOS sent to admin and the nearest worker.");
           await load();
+        } catch (error) {
+          toast.error(error?.response?.data?.detail || "Unable to trigger SOS right now.");
         } finally {
           setBusyAction("");
         }
@@ -339,18 +383,39 @@ export default function CustomerDashboard() {
           <button
             type="button"
             onClick={() => setSelectedPanel("create-elder")}
-            className="inline-flex shrink-0 items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600"
+            className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white transition ${
+              shouldShowOnboarding && onboardingStep === 0
+                ? "bg-emerald-600 ring-4 ring-emerald-100 hover:bg-emerald-700"
+                : "bg-emerald-500 hover:bg-emerald-600"
+            }`}
+            title="Start here by adding your first elder profile."
           >
             <CirclePlus size={16} />
             Add Elder
           </button>
-          <button
-            type="button"
-            onClick={() => setSelectedPanel("subscription")}
-            className="shrink-0 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            Subscription Details
-          </button>
+          {!hasActivePlan && hasElders ? (
+            <button
+              type="button"
+              onClick={() => navigate("/customer/subscriptions")}
+              className={`shrink-0 rounded-2xl px-4 py-2.5 text-sm font-medium transition ${
+                shouldShowOnboarding && onboardingStep === 1
+                  ? "bg-cyan-500 text-white ring-4 ring-cyan-100 hover:bg-cyan-600"
+                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+              title="Choose a plan before booking visits or using SOS."
+            >
+              Subscribe
+            </button>
+          ) : null}
+          {hasActivePlan ? (
+            <button
+              type="button"
+              onClick={() => setSelectedPanel("subscription")}
+              className="shrink-0 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              Subscription Details
+            </button>
+          ) : null}
           {totalUnpaidSosAmount > 0 ? (
             <button
               type="button"
@@ -361,6 +426,50 @@ export default function CustomerDashboard() {
             </button>
           ) : null}
         </div>
+
+        {shouldShowOnboarding ? (
+          <div className="mt-3 rounded-3xl border border-cyan-200 bg-cyan-50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="max-w-2xl">
+                <p className="text-sm font-semibold text-cyan-800">New here? Let&apos;s set up ELDERLY in a minute.</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {onboardingStep === 0 &&
+                    "Step 1 of 3: Add your elder profiles first so we know who and where care is needed."}
+                  {onboardingStep === 1 &&
+                    "Step 2 of 3: Take a subscription to unlock visit scheduling and SOS support for the location."}
+                  {onboardingStep === 2 &&
+                    "Step 3 of 3: You&apos;re ready. Book a visit when needed and keep SOS ready for urgent help."}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={dismissOnboarding}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  Skip
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onboardingStep === 0) {
+                      setSelectedPanel("create-elder");
+                      return;
+                    }
+                    if (onboardingStep === 1) {
+                      navigate("/customer/subscriptions");
+                      return;
+                    }
+                    dismissOnboarding();
+                  }}
+                  className="rounded-2xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-600"
+                >
+                  {onboardingStep === 2 ? "Finish" : "Continue"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -418,7 +527,10 @@ export default function CustomerDashboard() {
                           type="button"
                           onClick={() => openVisitScheduler(location)}
                           disabled={busyAction === `visit-${location.key}`}
-                          className="inline-flex items-center gap-2 rounded-2xl bg-cyan-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={hasActivePlan ? "Book an upcoming visit slot." : "Take a subscription first to book visits."}
+                          className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            hasActivePlan ? "bg-cyan-500 hover:bg-cyan-600" : "bg-slate-300 hover:bg-slate-300"
+                          }`}
                         >
                           <UserRoundCheck size={15} />
                           {busyAction === `visit-${location.key}` ? "Loading..." : "Schedule Visit"}
@@ -427,7 +539,10 @@ export default function CustomerDashboard() {
                           type="button"
                           onClick={() => triggerReverseSOS(location)}
                           disabled={busyAction === `sos-${location.key}`}
-                          className="inline-flex items-center gap-2 rounded-2xl bg-rose-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={hasActivePlan ? "Trigger urgent SOS support for this location." : "Take a subscription first to unlock SOS support."}
+                          className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            hasActivePlan ? "bg-rose-500 hover:bg-rose-600" : "bg-slate-300 hover:bg-slate-300"
+                          }`}
                         >
                           <Siren size={15} />
                           {busyAction === `sos-${location.key}` ? "Sending..." : "SOS"}
@@ -503,8 +618,25 @@ export default function CustomerDashboard() {
         {selectedLocation ? (
           <div className="space-y-4">
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm text-slate-500">Address</p>
-              <p className="mt-1 text-lg font-semibold text-slate-900">{selectedLocation.home_address}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-slate-500">Address</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">{selectedLocation.home_address}</p>
+                </div>
+                {locationEditElder ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedElderForEdit(locationEditElder);
+                      setSelectedPanel("edit-elder");
+                    }}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"
+                    title="Edit this location and elder details"
+                  >
+                    <Pencil size={16} />
+                  </button>
+                ) : null}
+              </div>
               <p className="mt-2 text-sm text-slate-600">
                 Elders: {selectedLocation.elders.map((elder) => elder.full_name).join(", ")}
               </p>
@@ -590,6 +722,20 @@ export default function CustomerDashboard() {
         title="Add Elder"
         onClose={() => setSelectedPanel("")}
         onSuccess={load}
+      />
+
+      <ElderFormDialog
+        open={selectedPanel === "edit-elder" && Boolean(selectedElderForEdit)}
+        title="Update Elder"
+        elder={selectedElderForEdit}
+        onClose={() => {
+          setSelectedPanel("location");
+          setSelectedElderForEdit(null);
+        }}
+        onSuccess={async () => {
+          await load();
+          setSelectedPanel("location");
+        }}
       />
 
       <ModalDialog

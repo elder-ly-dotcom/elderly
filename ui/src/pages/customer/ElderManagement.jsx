@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pencil, Trash2 } from "lucide-react";
+import { CirclePlus, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import ElderFormDialog from "../../components/customer/ElderFormDialog";
@@ -30,12 +30,25 @@ export default function ElderManagement() {
             <p className="text-sm uppercase tracking-[0.3em] text-emerald-700">Family Profile</p>
             <h2 className="mt-2 text-[1.85rem] font-semibold text-slate-900">Elders linked to this account</h2>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              Add new elders from the dashboard, and manage existing profiles here.
+              Add new elders or update existing profiles from this space.
             </p>
           </div>
-          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-            {elders.length} profile{elders.length === 1 ? "" : "s"}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              {elders.length} profile{elders.length === 1 ? "" : "s"}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedElder(null);
+                setDialogOpen(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-2xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600"
+            >
+              <CirclePlus size={16} />
+              Add Elder
+            </button>
+          </div>
         </div>
       </section>
 
@@ -79,14 +92,14 @@ export default function ElderManagement() {
           ))
         ) : (
           <p className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-            No elder profiles yet. Add the first elder from the dashboard.
+            No elder profiles yet. Use the Add Elder button here to create the first one.
           </p>
         )}
       </section>
 
       <ElderFormDialog
         open={dialogOpen}
-        title="Edit Elder"
+        title={selectedElder ? "Edit Elder" : "Add Elder"}
         elder={selectedElder}
         onClose={() => {
           setDialogOpen(false);
