@@ -11,6 +11,7 @@ import ElderManagement from "./pages/customer/ElderManagement";
 import SubscriptionsPage from "./pages/customer/Subscriptions";
 import CelebrationsPage from "./pages/customer/Celebrations";
 import VisitBookings from "./pages/customer/VisitBookings";
+import VisitBookingDetail from "./pages/customer/VisitBookingDetail";
 import WorkerDashboard from "./pages/worker/WorkerDashboard";
 import TaskReportingHub from "./pages/worker/TaskReportingHub";
 import UpcomingVisits from "./pages/worker/UpcomingVisits";
@@ -96,6 +97,7 @@ export default function App() {
             <Route path="subscriptions" element={<SubscriptionsPage />} />
             <Route path="celebrations" element={<CelebrationsPage />} />
             <Route path="visits" element={<VisitBookings />} />
+            <Route path="visits/:visitId" element={<VisitBookingDetail />} />
           </Route>
         </Route>
 

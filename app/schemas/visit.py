@@ -6,10 +6,12 @@ from app.models.visit import VisitStatus
 
 
 class VisitCheckInRequest(BaseModel):
+    visit_id: int | None = None
     elder_id: int
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     photo_data_url: str = Field(min_length=32)
+    start_otp: str | None = Field(default=None, min_length=4, max_length=8)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -106,6 +108,8 @@ class VisitResponse(BaseModel):
     scheduled_start_time: datetime | None = None
     scheduled_end_time: datetime | None = None
     location_address_snapshot: str | None = None
+    start_otp: str | None = None
+    otp_verified_at: datetime | None = None
     check_in_time: datetime | None
     check_out_time: datetime | None
     start_latitude: float | None
@@ -131,6 +135,12 @@ class VisitBookingDetailsResponse(BaseModel):
     worker_phone: str | None = None
     customer_name: str | None = None
     status_label: str
+
+
+class VisitExtensionRequest(BaseModel):
+    extend_minutes: int = Field(ge=15, le=120)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class AdminVisitRequestItem(BaseModel):
@@ -198,6 +208,8 @@ class WorkerAssignedElder(BaseModel):
     active_visit_started_at: datetime | None = None
     active_visit_status: VisitStatus | None = None
     pending_visit_id: int | None = None
+    scheduled_visit_start_time: datetime | None = None
+    scheduled_visit_end_time: datetime | None = None
 
 
 class CustomerVisitUsageResponse(BaseModel):

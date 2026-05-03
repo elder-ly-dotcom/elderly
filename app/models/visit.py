@@ -24,6 +24,8 @@ class Visit(Base):
     scheduled_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     scheduled_end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     location_address_snapshot: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    start_otp: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    otp_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     check_in_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     check_out_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     start_latitude: Mapped[float | None] = mapped_column(nullable=True)

@@ -77,6 +77,17 @@ function MetricCard({ label, value, hint }) {
   );
 }
 
+function formatVisitSlot(value) {
+  if (!value) return "Schedule pending";
+  return new Date(value).toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 const WEEK_DAYS = [
   { value: 0, label: "Mon" },
   { value: 1, label: "Tue" },
@@ -202,6 +213,7 @@ export default function WorkerDashboard() {
   const [dailySummary, setDailySummary] = useState({ completed_visits_today: 0, completed_emergencies_today: 0 });
   const [pendingStart, setPendingStart] = useState(null);
   const [startPhoto, setStartPhoto] = useState("");
+  const [startOtp, setStartOtp] = useState("");
   const [startingVisit, setStartingVisit] = useState(false);
   const [updatingStage, setUpdatingStage] = useState("");
   const [selectedPanel, setSelectedPanel] = useState("");
@@ -462,6 +474,7 @@ export default function WorkerDashboard() {
   const openStartFlow = (elder) => {
     setPendingStart(elder);
     setStartPhoto("");
+    setStartOtp("");
     setSelectedPanel("checkin");
   };
 
@@ -470,19 +483,26 @@ export default function WorkerDashboard() {
       toast.error("Capture a live photo before starting the visit.");
       return;
     }
+    if (pendingStart.pending_visit_id && !startOtp.trim()) {
+      toast.error("Customer OTP is mandatory before starting this visit.");
+      return;
+    }
     setStartingVisit(true);
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
         try {
           const response = await apiClient.post("/visits/verify", {
+            visit_id: pendingStart.pending_visit_id || undefined,
             elder_id: pendingStart.elder_id,
             latitude: coords.latitude,
             longitude: coords.longitude,
             photo_data_url: startPhoto,
+            start_otp: startOtp.trim() || undefined,
           });
           toast.success("Visit started successfully.");
           setPendingStart(null);
           setStartPhoto("");
+          setStartOtp("");
           setSelectedPanel("");
           await load();
           navigate(`/worker/report/${response.data.visit.id}`);
@@ -668,6 +688,9 @@ export default function WorkerDashboard() {
                         <p className="mt-1 text-sm text-slate-600">
                           {visitIsOngoing ? "Visit Ongoing" : visitIsPending ? "Pending Start" : "No open request"}
                         </p>
+                        {elder.scheduled_visit_start_time ? (
+                          <p className="mt-1 text-sm text-slate-500">Booked for: {formatVisitSlot(elder.scheduled_visit_start_time)}</p>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {elder.customer_phone ? (
@@ -894,6 +917,7 @@ export default function WorkerDashboard() {
           setSelectedPanel("");
           setPendingStart(null);
           setStartPhoto("");
+          setStartOtp("");
         }}
         widthClass="max-w-5xl"
       >
@@ -919,18 +943,46 @@ export default function WorkerDashboard() {
                     {pendingStart.pending_visit_id ? `Auto-assigned visit #${pendingStart.pending_visit_id}` : "Direct assigned elder"}
                   </span>
                 </p>
+                {pendingStart.scheduled_visit_start_time ? (
+                  <p className="rounded-2xl bg-white px-4 py-3">
+                    Scheduled: <span className="font-semibold text-slate-900">{formatVisitSlot(pendingStart.scheduled_visit_start_time)}</span>
+                  </p>
+                ) : null}
                 <p className="rounded-2xl bg-white px-4 py-3">
                   Photo evidence:{" "}
                   <span className={`font-semibold ${startPhoto ? "text-emerald-700" : "text-amber-700"}`}>
                     {startPhoto ? "Captured" : "Required before start"}
                   </span>
                 </p>
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+                  Verify the OTP shared by the requesting customer. The visit will start only if the entered OTP matches.
+                </div>
+                <label className="block rounded-2xl border-2 border-amber-300 bg-white px-4 py-3 shadow-[0_0_0_4px_rgba(251,191,36,0.12)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-slate-900">Customer OTP</span>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-800">
+                      Required
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={8}
+                    value={startOtp}
+                    onChange={(event) => setStartOtp(event.target.value.replace(/\D/g, ""))}
+                    placeholder="Enter OTP shared by customer"
+                    className="mt-2 w-full rounded-2xl border border-amber-300 bg-amber-50/40 px-4 py-3 text-slate-900 outline-none transition focus:border-amber-400 focus:bg-white"
+                  />
+                  <p className="mt-2 text-xs text-slate-600">
+                    Match it with the OTP shown in the customer&apos;s Visits screen before starting service.
+                  </p>
+                </label>
               </div>
 
               <button
                 type="button"
                 onClick={confirmStartVisit}
-                disabled={!startPhoto || startingVisit}
+                disabled={!startPhoto || startingVisit || (pendingStart?.pending_visit_id && !startOtp.trim())}
                 className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-white transition hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <BellRing size={16} />

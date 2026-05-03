@@ -13,6 +13,7 @@ from app.schemas.visit import (
     VisitCheckOutRequest,
     VisitRequestCreate,
     VisitResponse,
+    VisitExtensionRequest,
     VisitScheduleRequest,
     VisitSlotOption,
     VisitLiveStatusResponse,
@@ -27,6 +28,7 @@ from app.services.elder import get_elder_by_id
 from app.services.visit import (
     check_in_visit,
     end_visit,
+    extend_visit,
     get_active_visit_for_worker,
     get_visit_booking_details,
     get_visit_live_status,
@@ -209,6 +211,16 @@ async def visit_live_status(
     customer: Annotated[User, Depends(require_roles(Role.CUSTOMER))],
 ) -> VisitLiveStatusResponse:
     return await get_visit_live_status(db, visit_id=visit_id, customer=customer)
+
+
+@router.post("/{visit_id}/extend", response_model=VisitBookingDetailsResponse)
+async def extend_customer_visit(
+    visit_id: int,
+    payload: VisitExtensionRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    customer: Annotated[User, Depends(require_roles(Role.CUSTOMER))],
+) -> VisitBookingDetailsResponse:
+    return await extend_visit(db, visit_id=visit_id, customer=customer, payload=payload)
 
 
 @router.post("/worker-status", response_model=dict[str, str])

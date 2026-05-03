@@ -14,7 +14,7 @@ import {
   UserSearch,
   X,
 } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import logo from "/assets/logo.svg";
 
 import { useAuthStore } from "../../store/authStore";
@@ -43,6 +43,7 @@ function getIcon(label) {
 
 export default function PortalLayout({ title, links, navClassName }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout } = useAuthStore();
   const isWorkerPortal = title === "Worker Portal";
   const isCustomerPortal = title === "Customer Portal";
@@ -58,7 +59,7 @@ export default function PortalLayout({ title, links, navClassName }) {
   }, [title]);
 
   return (
-    <div className="min-h-screen bg-[#f7fbfd] text-slate-900">
+    <div className="min-h-screen overflow-x-hidden bg-[#f7fbfd] text-slate-900">
       <div className="mx-auto flex min-h-screen max-w-[1380px] flex-col lg:flex-row">
         <aside className="border-b border-emerald-100 bg-white/90 p-3 backdrop-blur lg:min-h-screen lg:w-64 lg:border-b-0 lg:border-r lg:border-r-emerald-100">
           <div className="rounded-3xl bg-gradient-to-br from-emerald-300 via-cyan-300 to-orange-200 p-[1px] shadow-[0_24px_60px_rgba(70,180,200,0.12)]">
@@ -144,9 +145,13 @@ export default function PortalLayout({ title, links, navClassName }) {
           ) : null}
         </aside>
 
-        <main className="flex-1 bg-[radial-gradient(circle_at_top,_rgba(70,180,200,0.18),_transparent_30%),linear-gradient(180deg,_#f9fffd_0%,_#eef8fb_100%)] p-3 sm:p-4 lg:p-5">
+        <main
+          className={`flex-1 overflow-x-hidden bg-[radial-gradient(circle_at_top,_rgba(70,180,200,0.18),_transparent_30%),linear-gradient(180deg,_#f9fffd_0%,_#eef8fb_100%)] p-3 sm:p-4 lg:p-5 ${
+            isCustomerPortal ? "pb-20 sm:pb-4" : ""
+          }`}
+        >
           {!isWorkerPortal ? (
-            <div className="mb-4 flex items-center justify-between rounded-[1.75rem] border border-white bg-white/80 px-4 py-3 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+            <div className="mb-3 hidden items-center justify-between rounded-[1.75rem] border border-white bg-white/80 px-4 py-3 shadow-[0_18px_45px_rgba(15,23,42,0.06)] sm:flex">
               <div>
                 <p className="text-xs uppercase tracking-[0.28em] text-cyan-700">Companion care platform</p>
                 <p className="mt-1 text-sm text-slate-500">Unified operations across customer, worker, and admin portals.</p>
@@ -211,6 +216,29 @@ export default function PortalLayout({ title, links, navClassName }) {
               Logout
             </button>
           </aside>
+        </div>
+      ) : null}
+
+      {isCustomerPortal ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-100 bg-white/95 px-2.5 pb-2.5 pt-2 backdrop-blur sm:hidden">
+          <nav className="grid grid-cols-5 gap-2">
+            {links.map((link) => {
+              const Icon = getIcon(link.label);
+              const isActive = location.pathname === link.to || location.pathname.startsWith(`${link.to}/`);
+              return (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  className={`flex min-w-0 flex-col items-center justify-center rounded-2xl px-1.5 py-2 text-[10px] font-medium transition ${
+                    isActive ? navClassName : "text-slate-500 hover:bg-emerald-50 hover:text-slate-900"
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="mt-1 max-w-full truncate">{link.label}</span>
+                </NavLink>
+              );
+            })}
+          </nav>
         </div>
       ) : null}
     </div>

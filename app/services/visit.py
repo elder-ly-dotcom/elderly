@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import math
+import secrets
 from collections import defaultdict
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -27,6 +28,7 @@ from app.schemas.visit import (
     VisitCheckInRequest,
     VisitCheckOutRequest,
     VisitBookingDetailsResponse,
+    VisitExtensionRequest,
     VisitRequestCreate,
     VisitResponse,
     VisitScheduleRequest,
@@ -115,6 +117,10 @@ def _slot_label(start_time: datetime) -> str:
     return start_time.astimezone(LOCAL_TZ).strftime("%a, %d %b | %I:%M %p")
 
 
+def _generate_visit_start_otp() -> str:
+    return f"{secrets.randbelow(10000):04d}"
+
+
 def _status_label(visit: Visit) -> str:
     if visit.status == VisitStatus.PENDING and visit.scheduled_start_time:
         return "Scheduled"
@@ -151,6 +157,32 @@ def _worker_is_available_in_shift(worker: User, slot_start: datetime, slot_end: 
         if not shift.is_active or shift.day_of_week != weekday:
             continue
         if shift.start_time <= local_start.time() and shift.end_time >= local_end.time():
+            return True
+    return False
+
+
+def _visit_location_key(visit: Visit) -> str:
+    if visit.location_address_snapshot:
+        return _normalize_address(visit.location_address_snapshot)
+    if visit.elder:
+        return _normalize_address(visit.elder.home_address)
+    return ""
+
+
+def _should_hide_shadow_pending_visit(candidate: Visit, visits: list[Visit]) -> bool:
+    if candidate.status != VisitStatus.PENDING:
+        return False
+    candidate_start = candidate.scheduled_start_time or candidate.check_in_time
+    candidate_end = candidate.scheduled_end_time or candidate.check_out_time
+    candidate_location = _visit_location_key(candidate)
+    for other in visits:
+        if other.id == candidate.id or other.status not in [VisitStatus.ACTIVE, VisitStatus.COMPLETED]:
+            continue
+        if _visit_location_key(other) != candidate_location:
+            continue
+        other_start = other.scheduled_start_time or other.check_in_time
+        other_end = other.scheduled_end_time or other.check_out_time
+        if _visit_overlaps(candidate_start, candidate_end, other_start or datetime.now(UTC), other_end or datetime.now(UTC)):
             return True
     return False
 
@@ -614,6 +646,7 @@ async def schedule_visit_request(
         scheduled_start_time=slot_start,
         scheduled_end_time=slot_end,
         location_address_snapshot=anchor.home_address,
+        start_otp=_generate_visit_start_otp(),
         notes=payload.notes,
         distance_meters=distance_km * 1000,
         status=VisitStatus.PENDING,
@@ -716,9 +749,11 @@ async def list_customer_scheduled_visits(session: AsyncSession, *, customer: Use
         .where(Elder.customer_id == customer.id)
         .order_by(Visit.scheduled_start_time.asc().nullslast(), desc(Visit.created_at))
     )
-    visits = result.scalars().all()
+    visits = [visit for visit in result.scalars().all() if visit.status != VisitStatus.REJECTED]
     items: list[VisitBookingDetailsResponse] = []
     for visit in visits:
+        if _should_hide_shadow_pending_visit(visit, visits):
+            continue
         items.append(await get_visit_booking_details(session, visit_id=visit.id, customer=customer))
     return items
 
@@ -736,9 +771,11 @@ async def list_worker_upcoming_visits(session: AsyncSession, *, worker: User) ->
         )
         .order_by(Visit.scheduled_start_time.asc())
     )
-    visits = result.scalars().all()
+    visits = [visit for visit in result.scalars().all() if visit.status != VisitStatus.REJECTED]
     items: list[WorkerUpcomingVisitItem] = []
     for visit in visits:
+        if _should_hide_shadow_pending_visit(visit, visits):
+            continue
         elder_result = await session.execute(
             select(Elder).where(
                 Elder.customer_id == visit.elder.customer_id,
@@ -821,17 +858,41 @@ async def check_in_visit(
     )
     is_allowed = distance_meters < settings.GEOFENCE_RADIUS_METERS
 
-    pending_result = await session.execute(
-        select(Visit)
-        .options(*VISIT_RELATIONSHIP_OPTIONS)
-        .where(
-            Visit.worker_id == worker.id,
-            Visit.elder_id == elder.id,
-            Visit.status == VisitStatus.PENDING,
+    visit = None
+    if payload.visit_id is not None:
+        visit_result = await session.execute(
+            select(Visit)
+            .options(*VISIT_RELATIONSHIP_OPTIONS, selectinload(Visit.elder))
+            .where(
+                Visit.id == payload.visit_id,
+                Visit.worker_id == worker.id,
+                Visit.status == VisitStatus.PENDING,
+            )
         )
-        .order_by(desc(Visit.created_at))
-    )
-    visit = pending_result.scalars().first()
+        visit = visit_result.scalar_one_or_none()
+        if visit is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scheduled visit not found for this worker.",
+            )
+        if _normalize_address(visit.elder.home_address) != _normalize_address(elder.home_address):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The selected visit does not match this location.",
+            )
+    else:
+        pending_result = await session.execute(
+            select(Visit)
+            .options(*VISIT_RELATIONSHIP_OPTIONS)
+            .where(
+                Visit.worker_id == worker.id,
+                Visit.elder_id == elder.id,
+                Visit.status == VisitStatus.PENDING,
+            )
+            .order_by(desc(Visit.created_at))
+        )
+        visit = pending_result.scalars().first()
+
     if visit is None:
         visit = Visit(
             worker_id=worker.id,
@@ -840,12 +901,43 @@ async def check_in_visit(
         )
         session.add(visit)
         await session.flush()
+    elif visit.start_otp:
+        submitted_otp = (payload.start_otp or "").strip()
+        if submitted_otp != visit.start_otp:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OTP mismatch. Enter the exact OTP shared by the customer to start this visit.",
+            )
 
     visit.check_in_time = datetime.now(UTC)
     visit.start_latitude = payload.latitude
     visit.start_longitude = payload.longitude
     visit.distance_meters = distance_meters
     visit.status = VisitStatus.ACTIVE if is_allowed else VisitStatus.REJECTED
+    if is_allowed and visit.start_otp:
+        visit.otp_verified_at = datetime.now(UTC)
+
+    if is_allowed:
+        current_start = visit.scheduled_start_time or visit.check_in_time or datetime.now(UTC)
+        current_end = visit.scheduled_end_time or (current_start + timedelta(hours=VISIT_SLOT_DURATION_HOURS))
+        overlapping_pending_result = await session.execute(
+            select(Visit)
+            .options(selectinload(Visit.elder))
+            .where(
+                Visit.worker_id == worker.id,
+                Visit.id != visit.id,
+                Visit.status == VisitStatus.PENDING,
+            )
+        )
+        current_location_key = _normalize_address(visit.elder.home_address)
+        for sibling in overlapping_pending_result.scalars().all():
+            sibling_start = sibling.scheduled_start_time or sibling.check_in_time
+            sibling_end = sibling.scheduled_end_time or sibling.check_out_time
+            sibling_location_key = _normalize_address(sibling.elder.home_address)
+            if sibling_location_key != current_location_key:
+                continue
+            if _visit_overlaps(sibling_start, sibling_end, current_start, current_end):
+                sibling.status = VisitStatus.REJECTED
 
     await _create_visit_image(
         session,
@@ -900,7 +992,14 @@ async def list_assigned_elders(session: AsyncSession, worker: User) -> list[Work
         )
         .order_by(desc(Visit.created_at))
     )
-    visits = visits_result.scalars().all()
+    now = datetime.now(UTC)
+    visits = [
+        visit
+        for visit in visits_result.scalars().all()
+        if visit.status == VisitStatus.ACTIVE
+        or visit.scheduled_start_time is None
+        or visit.scheduled_start_time >= now - timedelta(hours=1)
+    ]
 
     elder_by_id = {elder.id: elder for elder in elders}
     grouped_elders: dict[str, list[Elder]] = defaultdict(list)
@@ -936,6 +1035,8 @@ async def list_assigned_elders(session: AsyncSession, worker: User) -> list[Work
                 active_visit_started_at=active_visit.check_in_time if active_visit else None,
                 active_visit_status=active_visit.status if active_visit else None,
                 pending_visit_id=pending_visit.id if pending_visit else None,
+                scheduled_visit_start_time=(active_visit.scheduled_start_time if active_visit else pending_visit.scheduled_start_time if pending_visit else None),
+                scheduled_visit_end_time=(active_visit.scheduled_end_time if active_visit else pending_visit.scheduled_end_time if pending_visit else None),
             )
         )
     items.sort(key=lambda item: item.home_address.lower())
@@ -1021,6 +1122,56 @@ async def end_visit(
         select(Visit).options(*VISIT_RELATIONSHIP_OPTIONS).where(Visit.id == visit.id)
     )
     return result.scalar_one()
+
+
+async def extend_visit(
+    session: AsyncSession,
+    *,
+    visit_id: int,
+    customer: User,
+    payload: VisitExtensionRequest,
+) -> VisitBookingDetailsResponse:
+    result = await session.execute(
+        select(Visit)
+        .options(*VISIT_RELATIONSHIP_OPTIONS)
+        .join(Elder)
+        .where(Visit.id == visit_id, Elder.customer_id == customer.id)
+    )
+    visit = result.scalar_one_or_none()
+    if visit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visit not found")
+    if visit.status != VisitStatus.ACTIVE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only ongoing visits can be extended")
+    if visit.scheduled_end_time is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This visit does not have a scheduled end time")
+
+    next_end = visit.scheduled_end_time + timedelta(minutes=payload.extend_minutes)
+    slot_start = visit.scheduled_start_time or visit.check_in_time or datetime.now(UTC)
+    if not _worker_is_available_in_shift(visit.worker, slot_start, next_end):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The worker is not available in their shift for this extension window.",
+        )
+
+    busy_result = await session.execute(
+        select(Visit).where(
+            Visit.worker_id == visit.worker_id,
+            Visit.id != visit.id,
+            Visit.status.in_([VisitStatus.PENDING, VisitStatus.ACTIVE]),
+        )
+    )
+    for other_visit in busy_result.scalars().all():
+        other_start = other_visit.scheduled_start_time or other_visit.check_in_time
+        other_end = other_visit.scheduled_end_time or other_visit.check_out_time
+        if _visit_overlaps(other_start, other_end, slot_start, next_end):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The worker already has another task after this booking, so this visit cannot be extended.",
+            )
+
+    visit.scheduled_end_time = next_end
+    await session.commit()
+    return await get_visit_booking_details(session, visit_id=visit.id, customer=customer)
 
 
 async def get_visit_summary_for_customer(
