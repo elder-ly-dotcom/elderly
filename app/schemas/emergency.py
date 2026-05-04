@@ -16,6 +16,14 @@ class EmergencyTriggerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class EmergencyPendingActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    alert_id: int
+    dispatch_hold_until: datetime
+    is_dispatch_pending: bool = True
+
+
 class EmergencyResolveRequest(BaseModel):
     action_taken: str = Field(min_length=3, max_length=2000)
 
@@ -92,6 +100,10 @@ class EmergencyLogResponse(BaseModel):
     trigger_latitude: float | None
     trigger_longitude: float | None
     audio_note_url: str | None
+    dispatch_hold_until: datetime | None = None
+    dispatch_activated_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    is_dispatch_pending: bool = False
     start_time: datetime
     resolution_time: datetime | None
     action_taken: str | None

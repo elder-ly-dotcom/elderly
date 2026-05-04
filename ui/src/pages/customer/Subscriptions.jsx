@@ -129,15 +129,17 @@ export default function SubscriptionsPage() {
     toast.success("Current plan elders loaded. Choose a new tier or add-ons to upgrade.");
   };
 
+  const highlightPreview = selectedCatalog?.highlights?.slice(0, 2).join("  ") || "Choose a plan to view included services.";
+
   return (
     <div className="space-y-4 overflow-hidden">
       <section className="rounded-[1.75rem] border border-emerald-100 bg-white/90 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-sm uppercase tracking-[0.3em] text-emerald-700">Subscriptions</p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Compact plan manager</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Essential and Premium plans</h2>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              Keep only the controls you need here. Open details, history, and review in popups.
+              Choose the care plan for each home here. Celebration packages stay separate in the celebrations section.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -187,26 +189,26 @@ export default function SubscriptionsPage() {
             <CompactInfoCard
               label="Tier"
               value={selectedCatalog?.name || "Choose tier"}
-              subvalue={selectedCatalog ? `Base Rs. ${selectedCatalog.base_price}` : "No tier selected"}
+              subvalue={selectedCatalog ? `Rs. ${selectedCatalog.base_price} per month` : "No tier selected"}
               actionLabel="Choose Tier"
               onAction={() => setDialog("tiers")}
             />
             <CompactInfoCard
-              label="Add-ons"
-              value={`${selectedAddOns.length} selected`}
-              subvalue={selectedCatalog?.add_ons?.length ? "Open to manage extras" : "No add-ons for this tier"}
-              actionLabel="Manage Add-ons"
-              onAction={() => setDialog("addons")}
+              label="Included Services"
+              value={selectedCatalog?.highlights?.length || 0}
+              subvalue={highlightPreview}
+              actionLabel="View Services"
+              onAction={() => setDialog("tiers")}
             />
           </div>
         </div>
 
         <div className="rounded-[1.75rem] border border-cyan-100 bg-white/90 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-          <h3 className="text-xl font-semibold text-slate-900">Builder Summary</h3>
+          <h3 className="text-xl font-semibold text-slate-900">Plan Builder Summary</h3>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <CompactInfoCard label="Selected Elders" value={selectedElders.length} subvalue="Profiles included in builder" />
             <CompactInfoCard label="Selected Locations" value={selectedLocationCount} subvalue="Base plan billed per location" />
-            <CompactInfoCard label="Add-on Elders" value={additionalElderCount} subvalue="Charged only above 2 per location" />
+            <CompactInfoCard label="Add-on Elders" value={additionalElderCount} subvalue="Charged only above 2 elders at the same location" />
             <CompactInfoCard label="Mode" value={mode === "upgrade" ? "Upgrade" : "New Plan"} subvalue="Switches automatically when you load current plan" />
           </div>
 
@@ -255,7 +257,16 @@ export default function SubscriptionsPage() {
               <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{item.code}</p>
               <h3 className="mt-2 text-lg font-semibold text-slate-900">{item.name}</h3>
               <p className="mt-2 text-sm text-slate-600">{item.description}</p>
-              <p className="mt-3 text-sm text-emerald-700">Base Rs. {item.base_price} | Additional elder Rs. {item.additional_elder_fee}</p>
+              <p className="mt-3 text-sm text-emerald-700">Rs. {item.base_price} / month | Additional elder Rs. {item.additional_elder_fee}</p>
+              {item.highlights?.length ? (
+                <div className="mt-3 space-y-1 rounded-2xl border border-white/80 bg-white/80 p-3">
+                  {item.highlights.map((highlight) => (
+                    <p key={highlight} className="text-sm text-slate-600">
+                      {highlight}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
             </button>
           ))}
         </div>
@@ -295,7 +306,7 @@ export default function SubscriptionsPage() {
             ))
           ) : (
             <p className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-              No add-ons available for the selected tier.
+              Celebration packages are managed separately from the celebrations section. There are no extra add-ons inside this plan builder.
             </p>
           )}
         </div>
@@ -342,6 +353,17 @@ export default function SubscriptionsPage() {
               </p>
               <p className="mt-1">Elders selected: {quote.elder_count}</p>
             </div>
+
+            {quote.highlights.length ? (
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-semibold text-slate-900">Included services</p>
+                <div className="mt-2 space-y-1">
+                  {quote.highlights.map((highlight) => (
+                    <p key={highlight}>{highlight}</p>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {quote.add_ons.length ? (
               <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">

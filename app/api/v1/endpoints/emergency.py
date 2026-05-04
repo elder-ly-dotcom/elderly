@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models.user import Role, User
 from app.schemas.emergency import (
     EmergencyLogResponse,
+    EmergencyPendingActionResponse,
     EmergencyPaymentRequest,
     EmergencyPaymentResponse,
     EmergencyResolveRequest,
@@ -15,6 +16,8 @@ from app.schemas.emergency import (
     EmergencyTriggerRequest,
 )
 from app.services.emergency import (
+    activate_emergency,
+    cancel_pending_emergency,
     list_emergencies_for_user,
     pay_resolved_emergencies_for_location,
     resolve_emergency,
@@ -27,13 +30,37 @@ from app.services.notification import connection_manager
 router = APIRouter()
 
 
-@router.post("/trigger", response_model=EmergencyLogResponse)
+@router.post("/trigger", response_model=EmergencyPendingActionResponse)
 async def create_emergency(
     payload: EmergencyTriggerRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(require_roles(Role.CUSTOMER, Role.WORKER))],
-) -> EmergencyLogResponse:
+) -> EmergencyPendingActionResponse:
     log = await trigger_emergency(db, user=user, payload=payload)
+    return EmergencyPendingActionResponse(
+        alert_id=log.id,
+        dispatch_hold_until=log.dispatch_hold_until,
+        is_dispatch_pending=log.is_dispatch_pending,
+    )
+
+
+@router.post("/{alert_id}/activate", response_model=EmergencyLogResponse)
+async def activate_pending_emergency(
+    alert_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_roles(Role.CUSTOMER, Role.ADMIN))],
+) -> EmergencyLogResponse:
+    log = await activate_emergency(db, user=user, alert_id=alert_id)
+    return EmergencyLogResponse.model_validate(log)
+
+
+@router.post("/{alert_id}/cancel", response_model=EmergencyLogResponse)
+async def cancel_emergency(
+    alert_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(require_roles(Role.CUSTOMER, Role.ADMIN))],
+) -> EmergencyLogResponse:
+    log = await cancel_pending_emergency(db, user=user, alert_id=alert_id)
     return EmergencyLogResponse.model_validate(log)
 
 

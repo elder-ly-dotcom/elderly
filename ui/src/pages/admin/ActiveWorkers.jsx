@@ -158,7 +158,7 @@ export default function ActiveWorkers() {
                       <button
                         type="button"
                         onClick={() => openEdit(worker)}
-                        className="inline-flex items-center gap-2 rounded-2xl bg-orange-50 px-3 py-2 font-medium text-orange-700 transition hover:bg-orange-100"
+                        className="inline-flex items-center gap-2 rounded-2xl bg-indigo-50 px-3 py-2 font-medium text-indigo-700 transition hover:bg-indigo-100"
                       >
                         <SquarePen size={15} />
                         Edit

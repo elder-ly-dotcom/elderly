@@ -8,9 +8,11 @@ from app.db.session import get_db
 from app.models.user import Role, User
 from app.schemas.visit import (
     AdminVisitRequestItem,
+    VisitCancelRequest,
     VisitBookingDetailsResponse,
     VisitCheckInRequest,
     VisitCheckOutRequest,
+    VisitRescheduleRequest,
     VisitRequestCreate,
     VisitResponse,
     VisitExtensionRequest,
@@ -26,6 +28,7 @@ from app.schemas.visit import (
 )
 from app.services.elder import get_elder_by_id
 from app.services.visit import (
+    cancel_visit_request,
     check_in_visit,
     end_visit,
     extend_visit,
@@ -38,6 +41,7 @@ from app.services.visit import (
     list_worker_shifts,
     list_worker_upcoming_visits,
     replace_worker_shifts,
+    reschedule_visit_request,
     request_visit_dispatch,
     schedule_visit_request,
     update_worker_dispatch_status,
@@ -140,6 +144,32 @@ async def schedule_visit(
 ) -> VisitResponse:
     visit = await schedule_visit_request(db, customer=customer, payload=payload)
     return VisitResponse.model_validate(visit)
+
+
+@router.post("/{visit_id}/reschedule", response_model=VisitBookingDetailsResponse)
+async def reschedule_visit(
+    visit_id: int,
+    payload: VisitRescheduleRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    customer: Annotated[User, Depends(require_roles(Role.CUSTOMER))],
+) -> VisitBookingDetailsResponse:
+    return await reschedule_visit_request(
+        db,
+        visit_id=visit_id,
+        customer=customer,
+        scheduled_start_time=payload.scheduled_start_time,
+        notes=payload.notes,
+    )
+
+
+@router.post("/{visit_id}/cancel", response_model=VisitBookingDetailsResponse)
+async def cancel_visit(
+    visit_id: int,
+    payload: VisitCancelRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    customer: Annotated[User, Depends(require_roles(Role.CUSTOMER))],
+) -> VisitBookingDetailsResponse:
+    return await cancel_visit_request(db, visit_id=visit_id, customer=customer, reason=payload.reason)
 
 
 @router.get("/customer/upcoming", response_model=list[VisitBookingDetailsResponse])

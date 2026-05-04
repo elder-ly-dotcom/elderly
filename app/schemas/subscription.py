@@ -29,6 +29,7 @@ class SubscriptionQuoteResponse(BaseModel):
     base_price: float
     additional_elder_fee: float
     additional_elder_count: int
+    highlights: list[str] = Field(default_factory=list)
     add_ons: list[dict]
     total_price: float
 

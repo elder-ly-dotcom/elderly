@@ -81,7 +81,7 @@ export default function App() {
             element={
               <PortalLayout
                 title="Customer Portal"
-                navClassName="bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200"
+                navClassName="bg-indigo-100 text-indigo-800 ring-1 ring-indigo-200"
                 links={[
                   { to: "/customer/dashboard", label: "Dashboard" },
                   { to: "/customer/elders", label: "Profile" },
@@ -129,7 +129,7 @@ export default function App() {
             element={
               <PortalLayout
                 title="Admin Control Center"
-                navClassName="bg-orange-100 text-orange-800 ring-1 ring-orange-200"
+                navClassName="bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200"
                 links={[
                   { to: "/admin/dashboard", label: "Dashboard" },
                   { to: "/admin/workers-active", label: "Workers With Us" },

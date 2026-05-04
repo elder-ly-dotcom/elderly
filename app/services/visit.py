@@ -61,6 +61,7 @@ DISPATCH_RADIUS_KM = 5.0
 MONTHLY_VISIT_LIMIT_PER_LOCATION = 8
 VISIT_SLOT_HOURS = (10, 13, 16, 19)
 VISIT_SLOT_DURATION_HOURS = 2
+VISIT_MODIFICATION_CUTOFF_MINUTES = 10
 LOCAL_TZ = ZoneInfo("Asia/Calcutta")
 
 
@@ -122,6 +123,8 @@ def _generate_visit_start_otp() -> str:
 
 
 def _status_label(visit: Visit) -> str:
+    if visit.cancelled_at is not None:
+        return "Cancelled"
     if visit.status == VisitStatus.PENDING and visit.scheduled_start_time:
         return "Scheduled"
     if visit.status == VisitStatus.ACTIVE:
@@ -143,6 +146,27 @@ def _visit_overlaps(
         return False
     effective_end = existing_end or (existing_start + timedelta(hours=VISIT_SLOT_DURATION_HOURS))
     return existing_start < proposed_end and proposed_start < effective_end
+
+
+def _get_visit_modify_cutoff(visit: Visit) -> datetime | None:
+    if visit.scheduled_start_time is None:
+        return None
+    return visit.scheduled_start_time - timedelta(minutes=VISIT_MODIFICATION_CUTOFF_MINUTES)
+
+
+def _can_modify_visit(visit: Visit) -> bool:
+    if visit.status != VisitStatus.PENDING or visit.cancelled_at is not None:
+        return False
+    cutoff = _get_visit_modify_cutoff(visit)
+    return cutoff is not None and datetime.now(UTC) < cutoff
+
+
+def _ensure_visit_can_modify(visit: Visit) -> None:
+    if not _can_modify_visit(visit):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This booking can only be changed until 10 minutes before the scheduled start time.",
+        )
 
 
 def _worker_is_available_in_shift(worker: User, slot_start: datetime, slot_end: datetime) -> bool:
@@ -508,6 +532,7 @@ async def _get_busy_workers_for_window(
     *,
     window_start: datetime,
     window_end: datetime,
+    ignore_visit_id: int | None = None,
 ) -> set[int]:
     result = await session.execute(
         select(Visit)
@@ -517,6 +542,8 @@ async def _get_busy_workers_for_window(
     for visit in result.scalars().all():
         start_time = visit.scheduled_start_time or visit.check_in_time
         end_time = visit.scheduled_end_time or visit.check_out_time
+        if ignore_visit_id is not None and visit.id == ignore_visit_id:
+            continue
         if _visit_overlaps(start_time, end_time, window_start, window_end):
             busy.add(visit.worker_id)
     return busy
@@ -529,11 +556,17 @@ async def _find_available_workers_for_slot(
     longitude: float,
     slot_start: datetime,
     slot_end: datetime,
+    ignore_visit_id: int | None = None,
 ) -> list[tuple[User, float]]:
     workers = await _get_dispatch_ready_workers(session)
     if not workers:
         return []
-    busy_workers = await _get_busy_workers_for_window(session, window_start=slot_start, window_end=slot_end)
+    busy_workers = await _get_busy_workers_for_window(
+        session,
+        window_start=slot_start,
+        window_end=slot_end,
+        ignore_visit_id=ignore_visit_id,
+    )
     ranked_workers: list[tuple[User, float]] = []
     for worker in workers:
         if worker.id in busy_workers:
@@ -707,6 +740,139 @@ async def schedule_visit_request(
     return visit
 
 
+async def reschedule_visit_request(
+    session: AsyncSession,
+    *,
+    visit_id: int,
+    customer: User,
+    scheduled_start_time: datetime,
+    notes: str | None = None,
+) -> VisitBookingDetailsResponse:
+    result = await session.execute(
+        select(Visit)
+        .options(*VISIT_RELATIONSHIP_OPTIONS)
+        .join(Elder)
+        .where(Visit.id == visit_id, Elder.customer_id == customer.id)
+    )
+    visit = result.scalar_one_or_none()
+    if visit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visit not found")
+
+    _ensure_visit_can_modify(visit)
+
+    slot_start = scheduled_start_time.astimezone(UTC)
+    slot_end = slot_start + timedelta(hours=VISIT_SLOT_DURATION_HOURS)
+    location_elders = await _get_location_elders_for_customer(
+        session,
+        customer_id=customer.id,
+        location_address=visit.location_address_snapshot or visit.elder.home_address,
+    )
+    anchor = location_elders[0]
+    workers = await _find_available_workers_for_slot(
+        session,
+        latitude=anchor.home_latitude,
+        longitude=anchor.home_longitude,
+        slot_start=slot_start,
+        slot_end=slot_end,
+        ignore_visit_id=visit.id,
+    )
+    if not workers:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No worker is available for that date and time.")
+
+    assigned_worker, distance_km = workers[0]
+    visit.worker_id = assigned_worker.id
+    visit.scheduled_start_time = slot_start
+    visit.scheduled_end_time = slot_end
+    visit.distance_meters = distance_km * 1000
+    visit.start_otp = _generate_visit_start_otp()
+    visit.otp_verified_at = None
+    visit.rescheduled_at = datetime.now(UTC)
+    if notes:
+        visit.notes = notes
+
+    await session.commit()
+
+    slot_label = _slot_label(slot_start)
+    location_label = visit.location_address_snapshot or anchor.home_address
+    elder_names = ", ".join(item.full_name for item in location_elders)
+    queue_email(
+        recipients=[customer.email],
+        subject=f"ELDERLY visit rescheduled to {slot_label}",
+        text_body=(
+            f"Hi {customer.full_name},\n\n"
+            f"Your visit has been rescheduled to {slot_label}.\n"
+            f"Location: {location_label}\n"
+            f"Elders at location: {elder_names}\n"
+            f"Assigned worker: {assigned_worker.full_name}\n\n"
+            "You can review the updated booking from the customer portal.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    queue_email(
+        recipients=[assigned_worker.email],
+        subject=f"ELDERLY visit rescheduled for {slot_label}",
+        text_body=(
+            f"Hi {assigned_worker.full_name},\n\n"
+            f"A customer visit has been scheduled for {slot_label}.\n"
+            f"Customer: {customer.full_name}\n"
+            f"Location: {location_label}\n"
+            f"Elders at location: {elder_names}\n\n"
+            "Please review the updated timing in the worker portal.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    return await get_visit_booking_details(session, visit_id=visit.id, customer=customer)
+
+
+async def cancel_visit_request(
+    session: AsyncSession,
+    *,
+    visit_id: int,
+    customer: User,
+    reason: str | None = None,
+) -> VisitBookingDetailsResponse:
+    result = await session.execute(
+        select(Visit)
+        .options(*VISIT_RELATIONSHIP_OPTIONS)
+        .join(Elder)
+        .where(Visit.id == visit_id, Elder.customer_id == customer.id)
+    )
+    visit = result.scalar_one_or_none()
+    if visit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Visit not found")
+
+    _ensure_visit_can_modify(visit)
+
+    visit.status = VisitStatus.REJECTED
+    visit.cancelled_at = datetime.now(UTC)
+    visit.cancellation_reason = reason
+    await session.commit()
+
+    slot_label = _slot_label(visit.scheduled_start_time) if visit.scheduled_start_time else "the scheduled time"
+    location_label = visit.location_address_snapshot or (visit.elder.home_address if visit.elder else "the location")
+    queue_email(
+        recipients=[customer.email],
+        subject="ELDERLY visit cancelled",
+        text_body=(
+            f"Hi {customer.full_name},\n\n"
+            f"Your visit for {slot_label} at {location_label} has been cancelled.\n\n"
+            "You can book another time from the customer portal whenever needed.\n\n"
+            "Thank you,\nELDERLY"
+        ),
+    )
+    if visit.worker is not None:
+        queue_email(
+            recipients=[visit.worker.email],
+            subject="ELDERLY visit cancelled",
+            text_body=(
+                f"Hi {visit.worker.full_name},\n\n"
+                f"The customer cancelled the visit scheduled for {slot_label} at {location_label}.\n\n"
+                "Thank you,\nELDERLY"
+            ),
+        )
+    return await get_visit_booking_details(session, visit_id=visit.id, customer=customer)
+
+
 async def get_visit_booking_details(
     session: AsyncSession,
     *,
@@ -738,6 +904,9 @@ async def get_visit_booking_details(
         worker_phone=visit.worker.phone_number if visit.worker else None,
         customer_name=visit.requested_by_name or (visit.elder.customer.full_name if visit.elder and visit.elder.customer else None),
         status_label=_status_label(visit),
+        can_reschedule=_can_modify_visit(visit),
+        can_cancel=_can_modify_visit(visit),
+        can_modify_until=_get_visit_modify_cutoff(visit),
     )
 
 

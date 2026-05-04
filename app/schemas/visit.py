@@ -63,6 +63,19 @@ class VisitScheduleRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VisitRescheduleRequest(BaseModel):
+    scheduled_start_time: datetime
+    notes: str | None = Field(default=None, max_length=1000)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class VisitCancelRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class WorkerDispatchStatusUpdate(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
@@ -135,6 +148,9 @@ class VisitBookingDetailsResponse(BaseModel):
     worker_phone: str | None = None
     customer_name: str | None = None
     status_label: str
+    can_reschedule: bool = False
+    can_cancel: bool = False
+    can_modify_until: datetime | None = None
 
 
 class VisitExtensionRequest(BaseModel):

@@ -1,5 +1,6 @@
+import asyncio
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import desc, select
@@ -27,6 +28,7 @@ from app.services.communications import get_admin_alert_emails, queue_email, que
 from app.services.notification import connection_manager
 from app.services.subscription import customer_has_active_subscription_for_location
 from app.tasks.celery_app import dispatch_task
+from app.db.session import AsyncSessionLocal
 
 
 EMERGENCY_RELATIONSHIP_OPTIONS = (
@@ -37,6 +39,7 @@ EMERGENCY_RELATIONSHIP_OPTIONS = (
     selectinload(EmergencyLog.stage_updates).selectinload(EmergencyStageUpdate.updated_by),
     selectinload(EmergencyLog.worker_candidates).selectinload(EmergencyWorkerCandidate.worker),
 )
+SOS_CANCEL_WINDOW_SECONDS = 20
 
 WORKER_STAGE_TRANSITIONS: dict[EmergencyStage, set[EmergencyStage]] = {
     EmergencyStage.WORKER_ASSIGNED: {
@@ -72,6 +75,25 @@ WORKER_STAGE_TRANSITIONS: dict[EmergencyStage, set[EmergencyStage]] = {
 
 def _normalize_address(address: str) -> str:
     return " ".join(address.strip().lower().split())
+
+
+def _schedule_emergency_auto_activation(alert_id: int, triggered_by_id: int, hold_until: datetime | None) -> None:
+    async def _runner() -> None:
+        if hold_until is not None:
+            delay = max((hold_until - datetime.now(UTC)).total_seconds(), 0)
+            if delay:
+                await asyncio.sleep(delay + 0.2)
+        async with AsyncSessionLocal() as session:
+            user_result = await session.execute(select(User).where(User.id == triggered_by_id))
+            user = user_result.scalar_one_or_none()
+            if user is None:
+                return
+            try:
+                await activate_emergency(session, user=user, alert_id=alert_id)
+            except HTTPException:
+                return
+
+    asyncio.create_task(_runner())
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -184,6 +206,8 @@ async def _find_nearest_available_workers(
         select(EmergencyLog.assigned_worker_id).where(
             EmergencyLog.assigned_worker_id.is_not(None),
             EmergencyLog.status == EmergencyStatus.PENDING,
+            EmergencyLog.dispatch_activated_at.is_not(None),
+            EmergencyLog.cancelled_at.is_(None),
         )
     )
     busy_by_emergency = {item[0] for item in active_emergency_result.all() if item[0] is not None}
@@ -339,10 +363,9 @@ async def trigger_emergency(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Please subscribe to a care plan before triggering SOS for this location.",
         )
-    elder_names = ", ".join(item.full_name for item in location_elders)
-
     trigger_latitude = payload.latitude if payload.latitude is not None else anchor.home_latitude
     trigger_longitude = payload.longitude if payload.longitude is not None else anchor.home_longitude
+    hold_until = datetime.now(UTC) + timedelta(seconds=SOS_CANCEL_WINDOW_SECONDS)
 
     log = EmergencyLog(
         elder_id=anchor.id,
@@ -351,24 +374,54 @@ async def trigger_emergency(
         trigger_latitude=trigger_latitude,
         trigger_longitude=trigger_longitude,
         audio_note_url=payload.audio_note_url,
+        dispatch_hold_until=hold_until,
         current_stage=EmergencyStage.ADMIN_NOTIFIED,
         status=EmergencyStatus.PENDING,
     )
     session.add(log)
-    await session.flush()
+    await session.commit()
+    _schedule_emergency_auto_activation(log.id, user.id, hold_until)
+    return await _load_emergency_with_updates(session, log.id)
 
+
+async def activate_emergency(
+    session: AsyncSession,
+    *,
+    user: User,
+    alert_id: int,
+) -> EmergencyLog:
+    log = await _load_emergency_with_updates(session, alert_id)
+    if log.triggered_by_id != user.id and user.role != Role.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if log.cancelled_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This SOS was cancelled before dispatch.")
+    if log.dispatch_activated_at is not None:
+        return log
+    if log.dispatch_hold_until is not None and datetime.now(UTC) < log.dispatch_hold_until:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="SOS hold window is still active.")
+
+    elder_result = await session.execute(select(Elder).where(Elder.id == log.elder_id))
+    anchor = elder_result.scalar_one()
+    location_elders = await _resolve_location_elders(
+        session,
+        user=user,
+        payload=EmergencyTriggerRequest(elder_id=anchor.id, message=log.message, location_address=anchor.home_address),
+    )
+    elder_names = ", ".join(item.full_name for item in location_elders)
+
+    log.dispatch_activated_at = datetime.now(UTC)
     await _append_stage_update(
         session,
         log=log,
         stage=EmergencyStage.ADMIN_NOTIFIED,
         note=_default_stage_note(EmergencyStage.ADMIN_NOTIFIED),
-        updated_by_id=user.id,
+        updated_by_id=log.triggered_by_id,
     )
 
     workers = await _find_nearest_available_workers(
         session,
-        latitude=trigger_latitude,
-        longitude=trigger_longitude,
+        latitude=log.trigger_latitude or anchor.home_latitude,
+        longitude=log.trigger_longitude or anchor.home_longitude,
     )
     if workers:
         for worker, distance_km in workers:
@@ -402,16 +455,13 @@ async def trigger_emergency(
     customer_result = await session.execute(select(User).where(User.id == anchor.customer_id))
     location_customer = customer_result.scalar_one_or_none()
 
-    admin_payload = _build_emergency_payload(log, anchor, payload.message, event_type="emergency")
+    admin_payload = _build_emergency_payload(log, anchor, log.message, event_type="emergency")
     await connection_manager.broadcast_admin(admin_payload)
-    await connection_manager.notify_customer(
-        anchor.customer_id,
-        admin_payload,
-    )
+    await connection_manager.notify_customer(anchor.customer_id, admin_payload)
 
     dispatch_task(
         "app.tasks.emergency.dispatch_high_priority_alert",
-        kwargs={"alert_id": log.id, "user_id": anchor.customer_id, "message": payload.message},
+        kwargs={"alert_id": log.id, "user_id": anchor.customer_id, "message": log.message},
     )
     queue_email(
         recipients=get_admin_alert_emails(),
@@ -420,7 +470,7 @@ async def trigger_emergency(
             f"An SOS has been triggered for {anchor.home_address}.\n"
             f"Elders at location: {elder_names}\n"
             f"Triggered by: {user.full_name}\n"
-            f"Message: {payload.message}\n"
+            f"Message: {log.message}\n"
             f"Workers notified: {len(log.worker_candidates)}"
         ),
     )
@@ -455,7 +505,7 @@ async def trigger_emergency(
         )
         dispatch_task(
             "app.tasks.emergency.dispatch_high_priority_alert",
-            kwargs={"alert_id": log.id, "user_id": candidate.worker_id, "message": payload.message},
+            kwargs={"alert_id": log.id, "user_id": candidate.worker_id, "message": log.message},
         )
         if candidate.worker is not None:
             queue_email(
@@ -480,6 +530,28 @@ async def trigger_emergency(
     return log
 
 
+async def cancel_pending_emergency(
+    session: AsyncSession,
+    *,
+    user: User,
+    alert_id: int,
+) -> EmergencyLog:
+    log = await _load_emergency_with_updates(session, alert_id)
+    if log.triggered_by_id != user.id and user.role != Role.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if log.dispatch_activated_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This SOS has already been dispatched.")
+    if log.cancelled_at is not None:
+        return log
+    if log.dispatch_hold_until is not None and datetime.now(UTC) > log.dispatch_hold_until:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The SOS cancel window has expired.")
+
+    log.cancelled_at = datetime.now(UTC)
+    log.cancelled_by_id = user.id
+    await session.commit()
+    return await _load_emergency_with_updates(session, log.id)
+
+
 async def update_emergency_stage(
     session: AsyncSession,
     *,
@@ -491,6 +563,8 @@ async def update_emergency_stage(
     log = result.scalar_one_or_none()
     if log is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency not found")
+    if log.cancelled_at is not None or log.dispatch_activated_at is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This SOS is not active.")
     if user.role not in (Role.WORKER, Role.ADMIN):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     await session.refresh(log, attribute_names=["worker_candidates"])
@@ -583,6 +657,8 @@ async def resolve_emergency(
     log = result.scalar_one_or_none()
     if not log:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Emergency not found")
+    if log.cancelled_at is not None or log.dispatch_activated_at is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This SOS is not active.")
 
     log.responder_id = admin.id
     log.action_taken = payload.action_taken
@@ -603,6 +679,7 @@ async def list_emergencies_for_user(session: AsyncSession, user: User) -> list[E
     stmt = (
         select(EmergencyLog)
         .options(*EMERGENCY_RELATIONSHIP_OPTIONS)
+        .where(EmergencyLog.cancelled_at.is_(None), EmergencyLog.dispatch_activated_at.is_not(None))
         .order_by(desc(EmergencyLog.start_time))
     )
     if user.role == Role.CUSTOMER:

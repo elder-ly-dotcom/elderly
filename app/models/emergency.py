@@ -37,6 +37,10 @@ class EmergencyLog(Base):
     trigger_latitude: Mapped[float | None] = mapped_column(nullable=True)
     trigger_longitude: Mapped[float | None] = mapped_column(nullable=True)
     audio_note_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    dispatch_hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    dispatch_activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    cancelled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     service_fee_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=399)
     service_fee_paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     service_fee_paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -71,6 +75,7 @@ class EmergencyLog(Base):
         back_populates="responded_alerts",
         foreign_keys=[responder_id],
     )
+    cancelled_by: Mapped["User | None"] = relationship(foreign_keys=[cancelled_by_id])
     stage_updates: Mapped[list["EmergencyStageUpdate"]] = relationship(
         back_populates="emergency_log",
         cascade="all, delete-orphan",
@@ -111,6 +116,10 @@ class EmergencyLog(Base):
     @property
     def responder_phone(self) -> str | None:
         return self.responder.phone_number if self.responder else None
+
+    @property
+    def is_dispatch_pending(self) -> bool:
+        return self.cancelled_at is None and self.dispatch_activated_at is None and self.dispatch_hold_until is not None
 
 
 class EmergencyStageUpdate(Base):

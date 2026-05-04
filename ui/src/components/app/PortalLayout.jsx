@@ -61,8 +61,8 @@ export default function PortalLayout({ title, links, navClassName }) {
   return (
     <div className="min-h-screen overflow-x-hidden bg-[#f7fbfd] text-slate-900">
       <div className="mx-auto flex min-h-screen max-w-[1380px] flex-col lg:flex-row">
-        <aside className="border-b border-emerald-100 bg-white/90 p-3 backdrop-blur lg:min-h-screen lg:w-64 lg:border-b-0 lg:border-r lg:border-r-emerald-100">
-          <div className="rounded-3xl bg-gradient-to-br from-emerald-300 via-cyan-300 to-orange-200 p-[1px] shadow-[0_24px_60px_rgba(70,180,200,0.12)]">
+        <aside className="border-b border-indigo-100 bg-white/90 p-3 backdrop-blur lg:min-h-screen lg:w-64 lg:border-b-0 lg:border-r lg:border-r-indigo-100">
+          <div className="rounded-3xl bg-gradient-to-br from-indigo-300 via-cyan-300 to-emerald-300 p-[1px] shadow-[0_24px_60px_rgba(70,180,200,0.12)]">
             <div className="rounded-[calc(1.5rem-1px)] bg-white p-4">
               <div className="sm:hidden">
                 <div className="flex items-center justify-between gap-3">
@@ -76,7 +76,7 @@ export default function PortalLayout({ title, links, navClassName }) {
                   {isCustomerPortal ? (
                     <button
                       onClick={() => setMobileMenuOpen(true)}
-                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 transition hover:bg-emerald-50"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-indigo-100 bg-white text-slate-700 transition hover:bg-indigo-50"
                     >
                       <Menu size={18} />
                     </button>
@@ -86,7 +86,7 @@ export default function PortalLayout({ title, links, navClassName }) {
                         logout();
                         navigate("/");
                       }}
-                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-100 bg-white text-slate-700 transition hover:bg-emerald-50"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-indigo-100 bg-white text-slate-700 transition hover:bg-indigo-50"
                     >
                       <LogOut size={16} />
                     </button>
@@ -96,7 +96,7 @@ export default function PortalLayout({ title, links, navClassName }) {
 
               <div className="hidden sm:block">
                 <img src={logo} alt="ELDERLY logo" className="h-10 w-auto" />
-                <p className="mt-3 text-[11px] uppercase tracking-[0.32em] text-emerald-700">ELDERLY</p>
+                <p className="mt-3 text-[11px] uppercase tracking-[0.32em] text-indigo-700">ELDERLY</p>
                 <h1 className="mt-2 text-xl font-semibold text-slate-900">{title}</h1>
                 <p className="mt-1.5 text-sm text-slate-500">{user?.full_name}</p>
               </div>
@@ -120,7 +120,7 @@ export default function PortalLayout({ title, links, navClassName }) {
                     } gap-2 rounded-2xl px-4 py-2.5 text-sm transition ${
                       isActive
                         ? navClassName
-                        : "text-slate-600 hover:bg-emerald-50 hover:text-slate-900"
+                        : "text-slate-600 hover:bg-indigo-50 hover:text-slate-900"
                     }`
                   }
                 >
@@ -137,7 +137,7 @@ export default function PortalLayout({ title, links, navClassName }) {
                 logout();
                 navigate("/");
               }}
-              className={`mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-100 bg-white px-4 py-2.5 text-sm text-slate-700 transition hover:bg-emerald-50 ${isCustomerPortal ? "hidden sm:flex" : ""}`}
+              className={`mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border border-indigo-100 bg-white px-4 py-2.5 text-sm text-slate-700 transition hover:bg-indigo-50 ${isCustomerPortal ? "hidden sm:flex" : ""}`}
             >
               <LogOut size={16} />
               Logout
@@ -193,7 +193,7 @@ export default function PortalLayout({ title, links, navClassName }) {
                       `flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition ${
                         isActive
                           ? navClassName
-                          : "text-slate-600 hover:bg-emerald-50 hover:text-slate-900"
+                          : "text-slate-600 hover:bg-indigo-50 hover:text-slate-900"
                       }`
                     }
                   >
@@ -210,7 +210,7 @@ export default function PortalLayout({ title, links, navClassName }) {
                 logout();
                 navigate("/");
               }}
-              className="mt-auto flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-100 bg-white px-4 py-3 text-sm text-slate-700 transition hover:bg-emerald-50"
+              className="mt-auto flex w-full items-center justify-center gap-2 rounded-2xl border border-indigo-100 bg-white px-4 py-3 text-sm text-slate-700 transition hover:bg-indigo-50"
             >
               <LogOut size={16} />
               Logout
@@ -220,7 +220,7 @@ export default function PortalLayout({ title, links, navClassName }) {
       ) : null}
 
       {isCustomerPortal ? (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-emerald-100 bg-white/95 px-2.5 pb-2.5 pt-2 backdrop-blur sm:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-indigo-100 bg-white/95 px-2.5 pb-2.5 pt-2 backdrop-blur sm:hidden">
           <nav className="grid grid-cols-5 gap-2">
             {links.map((link) => {
               const Icon = getIcon(link.label);
@@ -230,7 +230,7 @@ export default function PortalLayout({ title, links, navClassName }) {
                   key={link.to}
                   to={link.to}
                   className={`flex min-w-0 flex-col items-center justify-center rounded-2xl px-1.5 py-2 text-[10px] font-medium transition ${
-                    isActive ? navClassName : "text-slate-500 hover:bg-emerald-50 hover:text-slate-900"
+                    isActive ? navClassName : "text-slate-500 hover:bg-indigo-50 hover:text-slate-900"
                   }`}
                 >
                   <Icon size={16} />

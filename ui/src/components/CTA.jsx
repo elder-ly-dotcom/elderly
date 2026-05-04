@@ -2,7 +2,7 @@ import React from "react";
 
 export default function CTA({ onOpenBooking }) {
   return (
-    <section className="bg-indigo-300 py-16 text-white text-center">
+    <section className="bg-gradient-to-r from-indigo-600 via-cyan-600 to-emerald-600 py-16 text-center text-white">
       <div className="max-w-4xl mx-auto px-6">
         <h2 className="text-4xl font-extrabold mb-4">
           Ready to Give Your Parents the Best Digital Care?
@@ -12,7 +12,7 @@ export default function CTA({ onOpenBooking }) {
         </p>
         <button
           onClick={onOpenBooking}
-          className="bg-indigo-500 hover:bg-indigo-400 px-8 py-4 rounded-lg font-semibold transition"
+          className="rounded-lg bg-white px-8 py-4 font-semibold text-indigo-700 transition hover:bg-indigo-50"
         >
           Book a Free Consultation
         </button>

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ellipsis, Home, MapPin, Phone, ShieldCheck } from "lucide-react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
+import ModalDialog from "../../components/app/ModalDialog";
 import apiClient from "../../lib/apiClient";
 import {
   canEnableLiveTracking,
@@ -102,6 +103,7 @@ function BookingMap({ liveStatus, enabled }) {
 
 export default function VisitBookingDetail() {
   const { visitId } = useParams();
+  const navigate = useNavigate();
   const [details, setDetails] = useState(null);
   const [liveStatus, setLiveStatus] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -109,6 +111,11 @@ export default function VisitBookingDetail() {
   const [showMore, setShowMore] = useState(false);
   const [headerAddressExpanded, setHeaderAddressExpanded] = useState(false);
   const [detailAddressExpanded, setDetailAddressExpanded] = useState(false);
+  const [actionDialog, setActionDialog] = useState("");
+  const [slotOptions, setSlotOptions] = useState([]);
+  const [selectedSlot, setSelectedSlot] = useState("");
+  const [actionBusy, setActionBusy] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -160,6 +167,77 @@ export default function VisitBookingDetail() {
         day: "numeric",
       })
     : "--";
+  const slotGroups = useMemo(() => {
+    const grouped = {};
+    for (const slot of slotOptions) {
+      const date = new Date(slot.start_time);
+      const key = date.toLocaleDateString("en-CA");
+      if (!grouped[key]) {
+        grouped[key] = {
+          key,
+          title: date.toLocaleDateString([], {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          }),
+          slots: [],
+        };
+      }
+      grouped[key].slots.push(slot);
+    }
+    return Object.values(grouped);
+  }, [slotOptions]);
+
+  const openRescheduleDialog = async () => {
+    setActionBusy("load-reschedule");
+    try {
+      const response = await apiClient.get("/visits/slots", {
+        params: { location_address: details?.visit?.location_address_snapshot },
+      });
+      setSlotOptions(response.data);
+      setSelectedSlot(response.data[0]?.start_time || "");
+      setActionDialog("reschedule");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Unable to load alternate slots right now.");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
+  const submitReschedule = async () => {
+    if (!selectedSlot) {
+      toast.error("Select a new slot first.");
+      return;
+    }
+    setActionBusy("reschedule");
+    try {
+      const response = await apiClient.post(`/visits/${visitId}/reschedule`, {
+        scheduled_start_time: selectedSlot,
+      });
+      setDetails(response.data);
+      setActionDialog("");
+      toast.success("Visit rescheduled successfully.");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "This visit could not be rescheduled.");
+    } finally {
+      setActionBusy("");
+    }
+  };
+
+  const submitCancellation = async () => {
+    setActionBusy("cancel");
+    try {
+      await apiClient.post(`/visits/${visitId}/cancel`, {
+        reason: cancelReason || null,
+      });
+      toast.success("Visit cancelled.");
+      navigate("/customer/visits");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "This visit could not be cancelled.");
+    } finally {
+      setActionBusy("");
+    }
+  };
 
   if (loading) {
     return <div className="rounded-[1.5rem] border border-emerald-100 bg-white/90 p-6 text-sm text-slate-500">Loading visit details...</div>;
@@ -260,6 +338,43 @@ export default function VisitBookingDetail() {
 
       <BookingMap liveStatus={liveStatus} enabled={liveTrackingEnabled} />
 
+      {(details.can_reschedule || details.can_cancel) && phase === "upcoming" ? (
+        <section className="rounded-[1.5rem] border border-cyan-200 bg-cyan-50/80 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-cyan-700">Booking Controls</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                Changes allowed until {details.can_modify_until ? formatVisitDateTime(details.can_modify_until) : "10 minutes before start"}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                You can reschedule or cancel this visit until 10 minutes before the booked service time.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {details.can_reschedule ? (
+                <button
+                  type="button"
+                  disabled={actionBusy === "load-reschedule"}
+                  onClick={openRescheduleDialog}
+                  className="rounded-xl bg-cyan-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {actionBusy === "load-reschedule" ? "Loading..." : "Reschedule"}
+                </button>
+              ) : null}
+              {details.can_cancel ? (
+                <button
+                  type="button"
+                  onClick={() => setActionDialog("cancel")}
+                  className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50"
+                >
+                  Cancel Visit
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       {phase === "ongoing" ? (
         <section className="rounded-[1.5rem] border border-cyan-200 bg-cyan-50/80 p-3 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
@@ -296,6 +411,130 @@ export default function VisitBookingDetail() {
           </div>
         </section>
       ) : null}
+
+      <ModalDialog
+        open={actionDialog === "reschedule"}
+        title="Reschedule Visit"
+        onClose={() => {
+          if (actionBusy === "reschedule") return;
+          setActionDialog("");
+          setSlotOptions([]);
+          setSelectedSlot("");
+        }}
+      >
+        <div className="space-y-4">
+          <div className="rounded-3xl border border-cyan-200 bg-cyan-50 p-4">
+            <p className="text-sm text-cyan-700">Current booking</p>
+            <p className="mt-1 text-base font-semibold text-slate-900">{formatVisitDateTime(details.visit.scheduled_start_time)}</p>
+            <p className="mt-2 text-sm text-slate-600">Choose a new available slot for the same home.</p>
+          </div>
+
+          {slotGroups.length ? (
+            <div className="space-y-3">
+              {slotGroups.map((group) => (
+                <div key={group.key} className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-900">{group.title}</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {group.slots.map((slot) => (
+                      <button
+                        key={slot.start_time}
+                        type="button"
+                        onClick={() => setSelectedSlot(slot.start_time)}
+                        className={`rounded-2xl border px-3 py-3 text-left transition ${
+                          selectedSlot === slot.start_time
+                            ? "border-cyan-300 bg-white text-slate-900"
+                            : "border-slate-200 bg-white/80 text-slate-700 hover:border-cyan-200"
+                        }`}
+                      >
+                        <p className="text-sm font-semibold">{formatVisitTime(slot.start_time)}</p>
+                        <p className="mt-1 text-xs text-slate-500">{slot.available_workers} worker(s) available</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-3xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              No alternate slots are available right now for this location.
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActionDialog("");
+                setSlotOptions([]);
+                setSelectedSlot("");
+              }}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              disabled={!selectedSlot || actionBusy === "reschedule"}
+              onClick={submitReschedule}
+              className="rounded-2xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {actionBusy === "reschedule" ? "Saving..." : "Confirm Reschedule"}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
+
+      <ModalDialog
+        open={actionDialog === "cancel"}
+        title="Cancel Visit"
+        onClose={() => {
+          if (actionBusy === "cancel") return;
+          setActionDialog("");
+          setCancelReason("");
+        }}
+        widthClass="max-w-lg"
+      >
+        <div className="space-y-4">
+          <div className="rounded-3xl border border-rose-200 bg-rose-50 p-4">
+            <p className="text-sm text-rose-700">Cancellation window</p>
+            <p className="mt-1 text-base font-semibold text-slate-900">
+              This booking can be cancelled until {details.can_modify_until ? formatVisitDateTime(details.can_modify_until) : "10 minutes before start"}.
+            </p>
+          </div>
+
+          <label className="block">
+            <span className="text-sm font-medium text-slate-700">Reason (optional)</span>
+            <textarea
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+              rows={4}
+              className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none transition focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+              placeholder="Add a short note for your records or the operations team."
+            />
+          </label>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setActionDialog("");
+                setCancelReason("");
+              }}
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              Keep Booking
+            </button>
+            <button
+              type="button"
+              disabled={actionBusy === "cancel"}
+              onClick={submitCancellation}
+              className="rounded-2xl bg-rose-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {actionBusy === "cancel" ? "Cancelling..." : "Confirm Cancel"}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
     </div>
   );
 }

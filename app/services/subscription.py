@@ -23,52 +23,32 @@ from app.services.communications import queue_email
 
 SERVICE_CATALOG = [
     ServiceCatalogItem(
-        code="bronze",
-        name="Bronze Care",
-        description="Essential support for seniors who need reliable digital help and regular reassurance.",
-        base_price=1499,
-        additional_elder_fee=799,
-        highlights=[
-            "Monthly digital assistance for phones and apps",
-            "Routine family updates after support sessions",
-            "Everyday help with payments and device setup",
-        ],
-        add_ons=[
-            {"code": "medicine-follow-up", "name": "Medicine Follow-up", "price": 299},
-            {"code": "priority-calls", "name": "Priority Family Calls", "price": 199},
-        ],
-    ),
-    ServiceCatalogItem(
-        code="silver",
-        name="Silver Care",
-        description="Balanced care for families who want stronger medical coordination and dependable visit support.",
-        base_price=2499,
-        additional_elder_fee=1299,
-        highlights=[
-            "Doctor appointment and prescription coordination",
-            "Medicine assistance and follow-up reminders",
-            "More structured support during ongoing care needs",
-        ],
-        add_ons=[
-            {"code": "lab-pickup", "name": "Lab Pickup Coordination", "price": 399},
-            {"code": "doctor-summary", "name": "Doctor Summary Note", "price": 249},
-        ],
-    ),
-    ServiceCatalogItem(
-        code="gold",
-        name="Gold Care",
-        description="Premium companion support with richer family visibility, errands, and high-touch peace-of-mind updates.",
+        code="essential",
+        name="Essential Care Plan",
+        description="Reliable monthly support for companionship, errands, transport help, and everyday wellness check-ins.",
         base_price=1999,
         additional_elder_fee=999,
         highlights=[
-            "Companion visits with social engagement and errands",
-            "Enhanced family visibility with richer visit notes",
-            "Ideal for seniors needing warmer, frequent human support",
+            "Two verified companion visits each week for check-ins, local walks, and nearby errands.",
+            "Medicine and grocery support with doorstep delivery handled for the family.",
+            "Weekly family video-call setup plus 24/7 taxi and Uber booking support.",
+            "Basic blood pressure, pulse, Wi-Fi, and essential appliance checks during visits.",
         ],
-        add_ons=[
-            {"code": "festival-visit", "name": "Festival Special Visit", "price": 499},
-            {"code": "photo-memory", "name": "Photo Memory Album", "price": 299},
+        add_ons=[],
+    ),
+    ServiceCatalogItem(
+        code="premium",
+        name="Premium Care Plan",
+        description="Full-service monthly care with medical coordination, home management, and richer family reporting.",
+        base_price=3999,
+        additional_elder_fee=1999,
+        highlights=[
+            "Includes every Essential service with doctor appointment support and hospital-grade transport coordination.",
+            "Repair visits, technician follow-up, and home utility bill handling are managed for the household.",
+            "Unlimited digital concierge help is available all day for tech, booking, and navigation support.",
+            "Every visit includes proactive wellness notes, dashboard updates, and emergency ambulance coordination.",
         ],
+        add_ons=[],
     ),
 ]
 
@@ -108,6 +88,7 @@ def _quote(
         base_price=service.base_price * location_count,
         additional_elder_fee=service.additional_elder_fee,
         additional_elder_count=additional_elder_count,
+        highlights=service.highlights,
         add_ons=add_ons,
         total_price=total,
     )

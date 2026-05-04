@@ -51,26 +51,26 @@ export default function Home() {
       </section>
       <section className="mx-auto mt-10 max-w-6xl px-4">
         <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-[2rem] border border-rose-100 bg-white/90 p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-            <div className="inline-flex items-center gap-2 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-rose-700">
+          <div className="rounded-[2rem] border border-emerald-100 bg-white/90 p-6 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
               <Gift size={14} />
-              Emotional care add-on
+              Tier 3 add-on
             </div>
-            <h3 className="mt-4 text-3xl font-semibold text-slate-900">Celebrate birthdays, festivals, and anniversaries from anywhere</h3>
+            <h3 className="mt-4 text-3xl font-semibold text-slate-900">The Celebration Add-On for meaningful family moments</h3>
             <p className="mt-3 text-base text-slate-600">
-              Even if you are far away from your loved ones, you can celebrate with them without any headache as ELDERLY arranges valet visits, decoration, cake, candles, favourite food, celebration photos, and optional family video-call assisted moments inside the app.
+              Add this booster to either care plan for specialized planning and execution of birthdays, anniversaries, and festive home celebrations. The same experience from the customer portal includes cake delivery, home decoration, and virtual party hosting support.
             </p>
             <div className="mt-5 flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={openBooking}
-                className="rounded-2xl bg-rose-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-600"
+                className="rounded-2xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-600"
               >
                 Explore Celebration Packages
               </button>
               <div className="inline-flex items-center gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-700">
                 <Video size={16} />
-                Family video-call assisted visit available
+                Virtual party hosting and family video-call support
               </div>
             </div>
           </div>

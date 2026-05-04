@@ -133,8 +133,15 @@ async def admin_dashboard_summary(
     emergency_counts = (
         await db.execute(
             select(
-                func.count(EmergencyLog.id).filter(EmergencyLog.status == EmergencyStatus.PENDING),
-                func.count(EmergencyLog.id).filter(EmergencyLog.status == EmergencyStatus.RESPONDED),
+                func.count(EmergencyLog.id).filter(
+                    EmergencyLog.status == EmergencyStatus.PENDING,
+                    EmergencyLog.dispatch_activated_at.is_not(None),
+                    EmergencyLog.cancelled_at.is_(None),
+                ),
+                func.count(EmergencyLog.id).filter(
+                    EmergencyLog.status == EmergencyStatus.RESPONDED,
+                    EmergencyLog.cancelled_at.is_(None),
+                ),
             )
         )
     ).one()
@@ -194,7 +201,11 @@ async def live_worker_tracking(
     open_emergency_result = await db.execute(
         select(EmergencyLog)
         .options(selectinload(EmergencyLog.elder))
-        .where(EmergencyLog.status == EmergencyStatus.PENDING)
+        .where(
+            EmergencyLog.status == EmergencyStatus.PENDING,
+            EmergencyLog.dispatch_activated_at.is_not(None),
+            EmergencyLog.cancelled_at.is_(None),
+        )
         .order_by(desc(EmergencyLog.start_time))
     )
     open_emergencies = open_emergency_result.scalars().all()

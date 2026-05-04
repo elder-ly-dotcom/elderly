@@ -190,7 +190,7 @@ export default function WorkerTracker() {
             </div>
           </div>
 
-          <div className="rounded-[2rem] border border-orange-100 bg-white/90 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+          <div className="rounded-[2rem] border border-indigo-100 bg-white/90 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
             <h3 className="text-xl font-semibold text-slate-900">Selected Worker Details</h3>
             {selectedWorker ? (
               <div className="mt-4 space-y-3">

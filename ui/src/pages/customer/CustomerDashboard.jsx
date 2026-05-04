@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import ModalDialog from "../../components/app/ModalDialog";
+import SlideToConfirm from "../../components/app/SlideToConfirm";
 import ElderFormDialog from "../../components/customer/ElderFormDialog";
 import apiClient from "../../lib/apiClient";
 import { WS_BASE_URL } from "../../lib/runtimeConfig";
@@ -63,6 +64,9 @@ export default function CustomerDashboard() {
   const [slotOptions, setSlotOptions] = useState([]);
   const [bookingLocation, setBookingLocation] = useState(null);
   const [bookingPreview, setBookingPreview] = useState(null);
+  const [sosConfirmLocation, setSosConfirmLocation] = useState(null);
+  const [pendingSosByLocation, setPendingSosByLocation] = useState({});
+  const [sosClock, setSosClock] = useState(Date.now());
   const [selectedBookingDate, setSelectedBookingDate] = useState("");
   const [bookingDateWindowStart, setBookingDateWindowStart] = useState(0);
   const [selectedElderForEdit, setSelectedElderForEdit] = useState(null);
@@ -276,6 +280,50 @@ export default function CustomerDashboard() {
     setOnboardingStep(2);
   }, [hasActivePlan, hasElders, onboardingDismissed]);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setSosClock(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    const now = sosClock;
+    Object.entries(pendingSosByLocation).forEach(([locationKey, item]) => {
+      if (item.activating || new Date(item.holdUntil).getTime() > now) {
+        return;
+      }
+      setPendingSosByLocation((current) => ({
+        ...current,
+        [locationKey]: {
+          ...current[locationKey],
+          activating: true,
+        },
+      }));
+      apiClient
+        .post(`/emergency/${item.alertId}/activate`)
+        .then(async () => {
+          toast.error("SOS dispatched to ELDERLY operations.");
+          setPendingSosByLocation((current) => {
+            const next = { ...current };
+            delete next[locationKey];
+            return next;
+          });
+          await load();
+        })
+        .catch((error) => {
+          const detail = error?.response?.data?.detail;
+          if (detail && !detail.toLowerCase().includes("already")) {
+            toast.error(detail || "Unable to dispatch SOS right now.");
+          }
+          setPendingSosByLocation((current) => {
+            const next = { ...current };
+            delete next[locationKey];
+            return next;
+          });
+          load();
+        });
+    });
+  }, [pendingSosByLocation, sosClock]);
+
   const dismissOnboarding = () => {
     localStorage.setItem("customer-dashboard-onboarding-skipped", "true");
     setOnboardingDismissed(true);
@@ -310,45 +358,88 @@ export default function CustomerDashboard() {
     }
   };
 
-  const triggerReverseSOS = (location) => {
+  const beginSosFlow = (location) => {
     if (!hasActivePlan) {
       toast.info("Take a subscription first to unlock SOS support for this location.");
       navigate("/customer/subscriptions");
       return;
     }
+    setSosConfirmLocation(location);
+  };
+
+  const triggerReverseSOS = async (location, coordinates = null) => {
     setBusyAction(`sos-${location.key}`);
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        try {
-          await apiClient.post("/emergency/trigger", {
-            location_address: location.home_address,
-            message: `Customer triggered urgent assistance for ${location.home_address}. Assigned worker callback needed immediately.`,
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-          });
-          toast.error("Reverse SOS sent to admin and the nearest worker.");
-          await load();
-        } catch (error) {
-          toast.error(error?.response?.data?.detail || "Unable to trigger SOS right now.");
-        } finally {
-          setBusyAction("");
-        }
+    try {
+      const response = await apiClient.post("/emergency/trigger", {
+        location_address: location.home_address,
+        message: `Customer triggered urgent assistance for ${location.home_address}. Assigned worker callback needed immediately.`,
+        latitude: coordinates?.latitude,
+        longitude: coordinates?.longitude,
+      });
+      setPendingSosByLocation((current) => ({
+        ...current,
+        [location.key]: {
+          alertId: response.data.alert_id,
+          holdUntil: response.data.dispatch_hold_until,
+          activating: false,
+        },
+      }));
+      setSosConfirmLocation(null);
+      toast.error("SOS armed. Dragged confirmation received. You can cancel it within 20 seconds.");
+    } catch (error) {
+      setSosConfirmLocation(null);
+      toast.error(error?.response?.data?.detail || "Unable to trigger SOS right now.");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const confirmReverseSOS = async (location) => {
+    const geolocation = navigator.geolocation;
+    if (!geolocation) {
+      await triggerReverseSOS(location);
+      return;
+    }
+    geolocation.getCurrentPosition(
+      ({ coords }) => {
+        triggerReverseSOS(location, {
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+        });
       },
-      async () => {
-        try {
-          await apiClient.post("/emergency/trigger", {
-            location_address: location.home_address,
-            message: `Customer triggered urgent assistance for ${location.home_address}. Assigned worker callback needed immediately.`,
-          });
-          toast.error("Reverse SOS sent to admin and the nearest worker.");
-          await load();
-        } catch (error) {
-          toast.error(error?.response?.data?.detail || "Unable to trigger SOS right now.");
-        } finally {
-          setBusyAction("");
-        }
-      }
+      () => {
+        triggerReverseSOS(location);
+      },
+      { enableHighAccuracy: true, timeout: 5000 }
     );
+  };
+
+  const cancelPendingSos = async (locationKey) => {
+    const pending = pendingSosByLocation[locationKey];
+    if (!pending) return;
+    setBusyAction(`cancel-sos-${locationKey}`);
+    try {
+      await apiClient.post(`/emergency/${pending.alertId}/cancel`);
+      setPendingSosByLocation((current) => {
+        const next = { ...current };
+        delete next[locationKey];
+        return next;
+      });
+      toast.success("SOS cancelled before dispatch.");
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || "Unable to cancel SOS right now.");
+      await load();
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const pendingSosLabel = (locationKey) => {
+    const pending = pendingSosByLocation[locationKey];
+    if (!pending) return "SOS";
+    if (pending.activating) return "Dispatching...";
+    const secondsLeft = Math.max(0, Math.ceil((new Date(pending.holdUntil).getTime() - sosClock) / 1000));
+    return `Cancel SOS ${secondsLeft}s`;
   };
 
   const shareReferral = async () => {
@@ -532,6 +623,7 @@ export default function CustomerDashboard() {
               locations.map((location) => {
                 const safetySummary = emergencySummaryByLocation[location.key];
                 const currentAlert = safetySummary?.latest;
+                const pendingSos = pendingSosByLocation[location.key];
                 return (
                   <div key={location.key} className="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -566,15 +658,25 @@ export default function CustomerDashboard() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => triggerReverseSOS(location)}
-                          disabled={busyAction === `sos-${location.key}`}
-                          title={hasActivePlan ? "Trigger urgent SOS support for this location." : "Take a subscription first to unlock SOS support."}
+                          onClick={() => (pendingSos ? cancelPendingSos(location.key) : beginSosFlow(location))}
+                          disabled={busyAction === `sos-${location.key}` || busyAction === `cancel-sos-${location.key}`}
+                          title={
+                            pendingSos
+                              ? "Cancel this SOS before the 20 second dispatch window ends."
+                              : hasActivePlan
+                                ? "Trigger urgent SOS support for this location."
+                                : "Take a subscription first to unlock SOS support."
+                          }
                           className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${
                             hasActivePlan ? "bg-rose-500 hover:bg-rose-600" : "bg-slate-300 hover:bg-slate-300"
                           }`}
                         >
                           <Siren size={15} />
-                          {busyAction === `sos-${location.key}` ? "Sending..." : "SOS"}
+                          {busyAction === `sos-${location.key}`
+                            ? "Arming..."
+                            : busyAction === `cancel-sos-${location.key}`
+                              ? "Cancelling..."
+                              : pendingSosLabel(location.key)}
                         </button>
                       </div>
                     </div>
@@ -945,6 +1047,52 @@ export default function CustomerDashboard() {
                 className="rounded-2xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-600"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </ModalDialog>
+
+      <ModalDialog
+        open={Boolean(sosConfirmLocation)}
+        title="Slide To Raise SOS"
+        onClose={() => {
+          if (busyAction.startsWith("sos-")) return;
+          setSosConfirmLocation(null);
+        }}
+        widthClass="max-w-lg"
+      >
+        {sosConfirmLocation ? (
+          <div className="space-y-4">
+            <div className="rounded-[1.75rem] border border-rose-200 bg-[linear-gradient(180deg,_rgba(255,255,255,0.96)_0%,_rgba(255,241,242,0.96)_100%)] p-4 shadow-[0_18px_45px_rgba(15,23,42,0.08)]">
+              <p className="text-xs uppercase tracking-[0.24em] text-rose-700">Emergency Confirmation</p>
+              <p className="mt-2 text-lg font-semibold text-slate-900">Hold and drag to request immediate SOS support</p>
+              <p className="mt-2 text-sm text-slate-600">
+                This extra confirmation prevents accidental emergency dispatches. Once triggered, you will still get 20 seconds to cancel.
+              </p>
+              <p className="mt-3 rounded-2xl border border-white/70 bg-white/80 px-3 py-2 text-sm font-medium text-slate-700">
+                Location: {sosConfirmLocation.home_address}
+              </p>
+            </div>
+
+            <SlideToConfirm
+              key={sosConfirmLocation.key}
+              label="Emergency dispatch"
+              helperText="Slide fully to the right to arm SOS for this home."
+              accentClassName="from-rose-500 to-rose-600"
+              confirmText={busyAction === `sos-${sosConfirmLocation.key}` ? "Preparing SOS..." : "Slide to raise SOS"}
+              onConfirm={() => confirmReverseSOS(sosConfirmLocation)}
+              disabled={busyAction === `sos-${sosConfirmLocation.key}`}
+            />
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSosConfirmLocation(null)}
+                disabled={busyAction === `sos-${sosConfirmLocation.key}`}
+                className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Close
               </button>
             </div>
           </div>

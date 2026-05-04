@@ -160,7 +160,7 @@ export default function AuthPanel() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full rounded-2xl bg-gradient-to-r from-emerald-400 via-cyan-400 to-orange-300 px-4 py-3 font-semibold text-slate-950 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-70"
+              className="w-full rounded-2xl bg-gradient-to-r from-indigo-500 via-cyan-500 to-emerald-500 px-4 py-3 font-semibold text-white transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {submitting ? "Please wait..." : mode === "login" ? "Enter Portal" : "Create Account"}
             </button>

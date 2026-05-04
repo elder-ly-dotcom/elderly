@@ -1,37 +1,37 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { ShieldCheck, Heart, Wifi, Siren } from "lucide-react";
+import { CalendarHeart, HeartPulse, ShieldCheck, ShoppingBag, Smartphone, Wrench } from "lucide-react";
 
 const services = [
   {
-    title: "Digital Life",
-    desc: "Bill payments, Uber/Ola bookings, groceries & medicines online",
+    title: "Verified Companion Visits",
+    desc: "Scheduled companionship visits for local walks, check-ins, and trusted neighborhood errands.",
+    icon: CalendarHeart,
+  },
+  {
+    title: "Essential Shopping Support",
+    desc: "Medicine and grocery procurement with dependable doorstep delivery support for daily needs.",
+    icon: ShoppingBag,
+  },
+  {
+    title: "Digital Connectivity",
+    desc: "Weekly family video-call setup plus ongoing tech guidance whenever parents need help.",
+    icon: Smartphone,
+  },
+  {
+    title: "Medical Coordination",
+    desc: "Doctor appointment assistance, companion support during checkups, and transport coordination.",
+    icon: HeartPulse,
+  },
+  {
+    title: "Home Utility Management",
+    desc: "Wi-Fi and appliance checks, repair follow-up, service oversight, and utility bill handling.",
+    icon: Wrench,
+  },
+  {
+    title: "Mobility & Emergency Support",
+    desc: "24/7 taxi booking support, ambulance dispatch coordination, and emergency hospital pre-registration.",
     icon: ShieldCheck,
-  },
-  {
-    title: "Digital Health",
-    desc: "Setup WhatsApp video calls with doctors & family, organize health records",
-    icon: Heart,
-  },
-  {
-    title: "Digital Safety",
-    desc: "Home CCTV installation and user-friendly guidance",
-    icon: Wifi,
-  },
-  {
-    title: "Device Support",
-    desc: "WiFi, printer, phone troubleshooting and fixes",
-    icon: ShieldCheck,
-  },
-  {
-    title: "Weekly Tech Check",
-    desc: "Regular home visits to keep everything running smoothly",
-    icon: Wifi,
-  },
-  {
-    title: "Emergency Support",
-    desc: "Home visits within 30 Minutes for urgent accident issues",
-    icon: Siren,
   },
 ];
 
@@ -45,7 +45,7 @@ export default function Services() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7 }}
         >
-          Our Service Menu
+          Services Designed Around Daily Care
         </motion.h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-16 pt-[30px]  mx-auto">
           {services.map(({ title, desc, icon: Icon }, i) => (

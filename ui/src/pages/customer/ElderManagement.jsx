@@ -82,7 +82,7 @@ export default function ElderManagement() {
                   <button
                     type="button"
                     onClick={() => remove(elder.id)}
-                    className="rounded-2xl bg-rose-50 p-3 text-rose-700 transition hover:bg-rose-100"
+                    className="rounded-2xl bg-slate-100 p-3 text-slate-600 transition hover:bg-slate-200"
                   >
                     <Trash2 size={16} />
                   </button>

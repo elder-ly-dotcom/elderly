@@ -44,6 +44,9 @@ class Visit(Base):
     photo_end_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     voice_note_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     voice_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rescheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     distance_meters: Mapped[float | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

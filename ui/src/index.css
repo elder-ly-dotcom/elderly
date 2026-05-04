@@ -1,1 +1,68 @@
 @import "tailwindcss";
+
+@theme {
+  --color-indigo-50: #f2f5ff;
+  --color-indigo-100: #e5ebff;
+  --color-indigo-200: #ccd6ff;
+  --color-indigo-300: #aebcff;
+  --color-indigo-400: #7d92ef;
+  --color-indigo-500: #5c76e0;
+  --color-indigo-600: #4d66d6;
+  --color-indigo-700: #3f54b8;
+  --color-indigo-800: #344697;
+  --color-indigo-900: #2d3c78;
+  --color-indigo-950: #1a2448;
+
+  --color-cyan-50: #effbfc;
+  --color-cyan-100: #d8f3f7;
+  --color-cyan-200: #b5e7ef;
+  --color-cyan-300: #82d4e1;
+  --color-cyan-400: #5bc2d3;
+  --color-cyan-500: #46b4c8;
+  --color-cyan-600: #328fa3;
+  --color-cyan-700: #2b7485;
+  --color-cyan-800: #285e6b;
+  --color-cyan-900: #244f5a;
+  --color-cyan-950: #12313a;
+
+  --color-emerald-50: #f4faef;
+  --color-emerald-100: #e5f3d9;
+  --color-emerald-200: #cfe7b7;
+  --color-emerald-300: #b0d98d;
+  --color-emerald-400: #99ce75;
+  --color-emerald-500: #89c669;
+  --color-emerald-600: #6fae51;
+  --color-emerald-700: #54843e;
+  --color-emerald-800: #466936;
+  --color-emerald-900: #3c5831;
+  --color-emerald-950: #1d3018;
+
+  --color-orange-50: #f2f5ff;
+  --color-orange-100: #e5ebff;
+  --color-orange-200: #ccd6ff;
+  --color-orange-300: #aebcff;
+  --color-orange-400: #7d92ef;
+  --color-orange-500: #5c76e0;
+  --color-orange-600: #4d66d6;
+  --color-orange-700: #3f54b8;
+  --color-orange-800: #344697;
+  --color-orange-900: #2d3c78;
+  --color-orange-950: #1a2448;
+
+  --color-amber-50: #f4faef;
+  --color-amber-100: #e5f3d9;
+  --color-amber-200: #cfe7b7;
+  --color-amber-300: #b0d98d;
+  --color-amber-400: #99ce75;
+  --color-amber-500: #89c669;
+  --color-amber-600: #6fae51;
+  --color-amber-700: #54843e;
+  --color-amber-800: #466936;
+  --color-amber-900: #3c5831;
+  --color-amber-950: #1d3018;
+}
+
+body {
+  background: #f7fbfd;
+  color: #1f2937;
+}

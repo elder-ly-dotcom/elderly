@@ -146,10 +146,10 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="rounded-[2rem] border border-orange-100 bg-white/90 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
+        <div className="rounded-[2rem] border border-emerald-100 bg-white/90 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-2xl font-semibold text-slate-900">Worker readiness</h3>
-            <span className="rounded-full bg-orange-100 px-3 py-1 text-xs font-medium text-orange-700">{workers.length} verified workers</span>
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">{workers.length} verified workers</span>
           </div>
           <div className="mt-4 grid gap-3">
             {workers.slice(0, 6).map((worker) => (
